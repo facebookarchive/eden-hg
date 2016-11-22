@@ -70,7 +70,7 @@ def create_thrift_client(eden_dir):
 
     if not os.path.isfile(pyremote):
         subprocess.check_call(
-            ['buck', 'build', 'eden/fs/service/...'],
+            ['buck', 'build', '//eden/fs/service:thrift-EdenService-pyremote'],
             cwd=src_repo
         )
 
