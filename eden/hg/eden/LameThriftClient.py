@@ -123,8 +123,19 @@ class TimeSpec(object):
 if __name__ == '__main__':
     '''This takes a single arg, which is an absolute path to an Eden mount.'''
     import sys
-    eden_client_root = sys.argv[1]
-    client = create_lame_thrift_client(eden_client_root)
-    materialized_result = client.getMaterializedEntries()
+    eden_mount = sys.argv[1]
+    eden_dir = os.path.join(os.environ['HOME'], 'local/.eden')
+    client = create_thrift_client(eden_dir)
+    materialized_result = client.getMaterializedEntries(eden_mount)
+
+    quote_fn = None
+    try:
+        import pipes
+        quote_fn = pipes.quote
+    except (ImportError, AttributeError):
+        import shlex
+        quote_fn = shlex.quote
+
     for filename in materialized_result.fileInfo:
-        print(filename)
+        # Use quoting to make it obvious that the empty string is an entry.
+        print(quote_fn(filename))
