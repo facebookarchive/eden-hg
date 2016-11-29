@@ -175,6 +175,7 @@ class edendirstate(object):
         self._ui = ui
         self._root = root
         self._rootdir = pathutil.normasprefix(root)
+        self._current_node_id = None
 
         # Store a vanilla dirstate object, so we can re-use some of its
         # functionality in a handful of cases.  Primarily this is just for cwd
@@ -275,8 +276,13 @@ class edendirstate(object):
     def parents(self):
         return [self.p1(), self.p2()]
 
+    def _get_current_node_id(self):
+        if not self._current_node_id:
+            self._current_node_id = self._client.getCurrentNodeID()
+        return self._current_node_id
+
     def p1(self):
-        commit = self._client.getCurrentNodeID()
+        commit = self._get_current_node_id()
         return self._repo._dirstatevalidate(commit)
 
     def p2(self):
@@ -301,7 +307,7 @@ class edendirstate(object):
         raise NotImplementedError('edendirstate._opendirstatefile()')
 
     def invalidate(self):
-        raise NotImplementedError('edendirstate.invalidate()')
+        self._current_node_id = None
 
     def copy(self, source, dest):
         """Mark dest as a copy of source. Unmark dest if source is None."""
