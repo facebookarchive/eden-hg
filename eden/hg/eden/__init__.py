@@ -59,9 +59,24 @@ def extsetup(ui):
     # like sqldirstate does.  Ideally code for wrapping filecache objects
     # should just get put into core mercurial.)
     orig = localrepo.localrepository.dirstate
+    # For some reason, localrepository.invalidatedirstate() does not call
+    # dirstate.invalidate() by default, so we must wrap it.
+    extensions.wrapfunction(localrepo.localrepository, 'invalidatedirstate',
+                            invalidatedirstate)
     extensions.wrapfunction(orig, 'func', wrapdirstate)
     extensions.wrapcommand(commands.table, 'add', overrides.add)
     orig.paths = ()
+
+
+def invalidatedirstate(orig, self):
+    if _requirement in self.requirements:
+        self.dirstate.invalidate()
+    else:
+        # In Eden, we do not want the original behavior of
+        # localrepository.invalidatedirstate because it operates on the private
+        # _filecache property of dirstate, which is not a field we provide in
+        # edendirstate.
+        orig(self)
 
 
 def reposetup(ui, repo):
@@ -185,9 +200,6 @@ class edendirstate(object):
 
         self._parentwriters = 0
 
-        # Unclear who writes this.
-        self._filecache = {}
-
     def thrift_scm_add(self, path):
         '''path must be a normalized path relative to the repo root.'''
         self._client.add(path)
@@ -307,6 +319,19 @@ class edendirstate(object):
         raise NotImplementedError('edendirstate._opendirstatefile()')
 
     def invalidate(self):
+        '''Clears local state such that it is forced to be recomputed the next
+        time it is accessed.
+
+        This method is invoked when the lock is acquired via
+        localrepository.wlock(). In wlock(),
+        localrepository.invalidatedirstate() is called when the lock is
+        acquired, which calls dirstate.invalidate() (surprisingly, this is only
+        because we have redefined localrepository.invalidatedirstate() to do so
+        in extsetup(ui)).
+
+        This method is also invoked when the lock is released if
+        self.pendingparentchange() is True.
+        '''
         self._current_node_id = None
 
     def copy(self, source, dest):
