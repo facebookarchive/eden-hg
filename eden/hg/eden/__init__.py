@@ -1,3 +1,4 @@
+#!/usr/bin/env python2
 # Copyright (c) 2016, Facebook, Inc.
 # All Rights Reserved.
 #
@@ -16,10 +17,31 @@ from __future__ import print_function
 
 import os
 
-from mercurial import extensions, localrepo, pathutil, node, scmutil, util
+from mercurial import (
+    commands, extensions, localrepo, pathutil, node, scmutil, util
+)
 from mercurial import dirstate as dirstate_mod
 
-from .LameThriftClient import create_thrift_client
+from .LameThriftClient import create_thrift_client, ThriftHgStatusCode
+
+'''
+In general, there are two appraoches we could take to implement subcommands like
+`hg add` in Eden:
+1. Make sure that edendirstate implements the full dirstate API such that we
+   use the default implementation of `hg add` and it has no idea that it is
+   talking to edendirstate.
+2. Reimplement `hg add` completely.
+
+In general, #1 is a better approach because it is helpful for other built-in
+commands in Hg that also talk to the dirstate. However, it appears that `hg add`
+calls `dirstate.walk()`, which is a real pain to implement, and honestly,
+something we probably don't want to implement. We can make more progress by
+redefining `hg add` in Eden so it does a simple Thrift call to update the
+overlay.
+'''
+from . import (
+    overrides,
+)
 
 _requirement = 'eden'
 _repoclass = localrepo.localrepository
@@ -38,6 +60,7 @@ def extsetup(ui):
     # should just get put into core mercurial.)
     orig = localrepo.localrepository.dirstate
     extensions.wrapfunction(orig, 'func', wrapdirstate)
+    extensions.wrapcommand(commands.table, 'add', overrides.add)
     orig.paths = ()
 
 
@@ -106,17 +129,32 @@ class EdenThriftClient(object):
 
     def getStatus(self):
         status = ClientStatus()
-        # TODO(mbolin): Currently, materialized entries are ~= to modified
-        # files. Need to address corner cases.
-        for filename in self._getMaterializedEntries().fileInfo:
-            if (filename == '' or filename.startswith('.hg/')):
+        thrift_hg_status = self._client.scmGetStatus(self._root)
+        for path, code in thrift_hg_status.entries.iteritems():
+            # TODO(mbolin): Perform this filtering on the server.
+            if path.startswith('.hg/'):
                 continue
-            if os.path.isdir(os.path.join(self._root, filename)):
-                continue
-            # TODO(mbolin): It is not correct to assume every file in this list
-            # is a modified file.
-            status.modified.append(filename)
+            if code == ThriftHgStatusCode.MODIFIED:
+                status.modified.append(path)
+            elif code == ThriftHgStatusCode.ADDED:
+                status.added.append(path)
+            elif code == ThriftHgStatusCode.REMOVED:
+                status.removed.append(path)
+            elif code == ThriftHgStatusCode.MISSING:
+                status.deleted.append(path)
+            elif code == ThriftHgStatusCode.NOT_TRACKED:
+                status.unknown.append(path)
+            elif code == ThriftHgStatusCode.IGNORED:
+                status.ignored.append(path)
+            elif code == ThriftHgStatusCode.CLEAN:
+                status.clean.append(path)
+            else:
+                raise Exception('Unexpected status code: %s' % code)
         return status
+
+    def add(self, path):
+        '''path must be a normalized path relative to the repo root.'''
+        self._client.scmAdd(self._root, path)
 
 
 class edendirstate(object):
@@ -148,6 +186,10 @@ class edendirstate(object):
 
         # Unclear who writes this.
         self._filecache = {}
+
+    def thrift_scm_add(self, path):
+        '''path must be a normalized path relative to the repo root.'''
+        self._client.add(path)
 
     def beginparentchange(self):
         self._parentwriters += 1
@@ -287,7 +329,9 @@ class edendirstate(object):
 
     def add(self, f):
         """Mark a file added."""
-        raise NotImplementedError('edendirstate.add()')
+        raise NotImplementedError(
+            'Unexpected call to edendirstate.add(). ' +
+            'All calls to add() are expected to go through the CLI.')
 
     def remove(self, f):
         """Mark a file removed."""

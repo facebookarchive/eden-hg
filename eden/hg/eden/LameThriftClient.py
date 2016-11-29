@@ -34,6 +34,12 @@ class LameThriftClient(object):
     def getMaterializedEntries(self, mount_point):
         return self._call(['getMaterializedEntries', mount_point])
 
+    def scmAdd(self, mount_point, path):
+        return self._call(['scmAdd', mount_point, path])
+
+    def scmGetStatus(self, mount_point):
+        return self._call(['scmGetStatus', mount_point])
+
     def _call(self, api_args):
         proc = subprocess.Popen(
             [self._pyremote, '--path', self._eden_socket, '-f'] + api_args,
@@ -78,6 +84,8 @@ def create_thrift_client(eden_dir):
 
 
 # !!! HAND-GENERATED PYTHON CLASSES BASED ON eden.thrift !!!
+# See buck-out/gen/eden/fs/service/thrift-py-eden.thrift/gen-py/facebook/eden/ttypes.py
+# for real Python codegen.
 class MaterializedResult(object):
     def __init__(self, currentPosition, fileInfo):
         self.currentPosition = currentPosition
@@ -119,6 +127,41 @@ class TimeSpec(object):
     def __init__(self, seconds, nanoSeconds):
         self._seconds = seconds
         self._nanoSeconds = nanoSeconds
+
+
+class ThriftHgStatus(object):
+    def __init__(self, entries):
+        self.entries = entries
+
+
+class ThriftHgStatusCode(object):
+    CLEAN = 0
+    MODIFIED = 1
+    ADDED = 2
+    REMOVED = 3
+    MISSING = 4
+    NOT_TRACKED = 5
+    IGNORED = 6
+
+    _VALUES_TO_NAMES = {
+        0: "CLEAN",
+        1: "MODIFIED",
+        2: "ADDED",
+        3: "REMOVED",
+        4: "MISSING",
+        5: "NOT_TRACKED",
+        6: "IGNORED",
+    }
+
+    _NAMES_TO_VALUES = {
+        "CLEAN": 0,
+        "MODIFIED": 1,
+        "ADDED": 2,
+        "REMOVED": 3,
+        "MISSING": 4,
+        "NOT_TRACKED": 5,
+        "IGNORED": 6,
+    }
 
 if __name__ == '__main__':
     '''This takes a single arg, which is an absolute path to an Eden mount.'''
