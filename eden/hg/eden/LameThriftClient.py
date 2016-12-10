@@ -43,6 +43,11 @@ class LameThriftClient(object):
     def scmGetStatus(self, mount_point):
         return self._call(['scmGetStatus', mount_point])
 
+    def scmMarkCommitted(self, mount_point, node, paths_to_clear,
+                         paths_to_drop):
+        return self._call(['scmMarkCommitted', mount_point, node,
+                           repr(paths_to_clear), repr(paths_to_drop)])
+
     def _call(self, api_args):
         proc = subprocess.Popen(
             [self._pyremote, '--path', self._eden_socket, '-f'] + api_args,

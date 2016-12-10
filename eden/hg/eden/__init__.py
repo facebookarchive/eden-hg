@@ -18,7 +18,7 @@ from __future__ import print_function
 import os
 
 from mercurial import (
-    commands, extensions, localrepo, pathutil, node, scmutil, util
+    commands, context, extensions, localrepo, pathutil, node, scmutil, util
 )
 from mercurial import dirstate as dirstate_mod
 
@@ -63,6 +63,8 @@ def extsetup(ui):
     # dirstate.invalidate() by default, so we must wrap it.
     extensions.wrapfunction(localrepo.localrepository, 'invalidatedirstate',
                             invalidatedirstate)
+    extensions.wrapfunction(context.committablectx, 'markcommitted',
+                            mark_committed)
     extensions.wrapfunction(orig, 'func', wrapdirstate)
     extensions.wrapcommand(commands.table, 'add', overrides.add)
     extensions.wrapcommand(commands.table, 'remove', overrides.remove)
@@ -78,6 +80,31 @@ def invalidatedirstate(orig, self):
         # _filecache property of dirstate, which is not a field we provide in
         # edendirstate.
         orig(self)
+
+
+def mark_committed(orig, self, node):
+    '''Perform post-commit cleanup necessary after committing this ctx (self).
+
+    Specifically, self is a commitablectx from context.py.
+    '''
+    if _requirement in self._repo.requirements:
+        # When markcommitted() is called from localrepo.py, it is in the middle
+        # of a transaction. The commit data for the specified `node` will not be
+        # written to .hg until the transaction completes. Because our
+        # server-side logic relies on being able to read the commit data out of
+        # .hg, we schedule it as an addpostclose callback on the current
+        # transaction rather than execute it directly here.
+        def callback(tr):
+            dirstate = self._repo.dirstate
+            dirstate.beginparentchange()
+            paths_to_clear = self.modified() + self.added()
+            paths_to_drop = self.removed()
+            dirstate.mark_committed(node, paths_to_clear, paths_to_drop)
+            dirstate.endparentchange()
+
+        self._repo.currenttransaction().addpostclose('commit', callback)
+    else:
+        orig(self, node)
 
 
 def reposetup(ui, repo):
@@ -178,6 +205,10 @@ class EdenThriftClient(object):
         Note that each path in paths may refer to a file or a directory.
         '''
         return self._client.scmRemove(self._root, paths, force)
+
+    def mark_committed(self, node, paths_to_clear, paths_to_drop):
+        self._client.scmMarkCommitted(self._root, node, paths_to_clear,
+                                      paths_to_drop)
 
 
 class edendirstate(object):
@@ -318,6 +349,9 @@ class edendirstate(object):
     def branch(self):
         return 'default'
 
+    def mark_committed(self, node, paths_to_clear, paths_to_drop):
+        self._client.mark_committed(node, paths_to_clear, paths_to_drop)
+
     def setparents(self, p1, p2=node.nullid):
         """Set dirstate parents to p1 and p2."""
         if self._parentwriters == 0:
@@ -354,20 +388,22 @@ class edendirstate(object):
         raise NotImplementedError('edendirstate.copy()')
 
     def copied(self, file):
-        # FIXME
+        # TODO(mbolin): Once we update edendirstate to properly store copy
+        # information, we will have to return True if there are any
+        # copies/renames.
         return False
 
     def copies(self):
-        # FIXME
+        # TODO(mbolin): Once we update edendirstate to properly store copy
+        # information, we will have to include it in the dict returned by this
+        # method.
         return {}
 
     def normal(self, f):
-        # FIXME
-        pass
+        raise NotImplementedError('edendirstate.normal(%s)' % f)
 
     def normallookup(self, f):
-        # FIXME
-        pass
+        raise NotImplementedError('edendirstate.normallookup(%s)' % f)
 
     def otherparent(self, f):
         """Mark as coming from the other parent, always dirty."""
