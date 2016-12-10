@@ -65,6 +65,7 @@ def extsetup(ui):
                             invalidatedirstate)
     extensions.wrapfunction(orig, 'func', wrapdirstate)
     extensions.wrapcommand(commands.table, 'add', overrides.add)
+    extensions.wrapcommand(commands.table, 'remove', overrides.remove)
     orig.paths = ()
 
 
@@ -171,6 +172,13 @@ class EdenThriftClient(object):
         '''path must be a normalized path relative to the repo root.'''
         self._client.scmAdd(self._root, path)
 
+    def remove(self, paths, force):
+        '''paths must be normalized paths relative to the repo root.
+
+        Note that each path in paths may refer to a file or a directory.
+        '''
+        return self._client.scmRemove(self._root, paths, force)
+
 
 class edendirstate(object):
     '''
@@ -203,6 +211,13 @@ class edendirstate(object):
     def thrift_scm_add(self, path):
         '''path must be a normalized path relative to the repo root.'''
         self._client.add(path)
+
+    def thrift_scm_remove(self, paths, force):
+        '''paths must be normalized paths relative to the repo root.
+
+        Note that each path in paths may refer to a file or a directory.
+        '''
+        return self._client.remove(paths, force)
 
     def beginparentchange(self):
         self._parentwriters += 1
@@ -366,7 +381,9 @@ class edendirstate(object):
 
     def remove(self, f):
         """Mark a file removed."""
-        raise NotImplementedError('edendirstate.remove()')
+        raise NotImplementedError(
+            'Unexpected call to edendirstate.remove(). ' +
+            'All calls to remove() are expected to go through the CLI.')
 
     def merge(self, f):
         """Mark a file merged."""

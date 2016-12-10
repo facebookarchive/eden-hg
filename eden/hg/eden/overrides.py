@@ -67,3 +67,27 @@ def _add(root, dirstate, paths, cwd):
         dirstate.thrift_scm_add(path)
 
     return 0
+
+
+def remove(orig, ui, repo, *paths, **opts):
+    '''Mark files removed.'''
+    if opts['after']:
+        raise NotImplementedError('--after is not supported')
+    if opts['exclude']:
+        raise NotImplementedError('--exclude is not supported')
+    if opts['include']:
+        raise NotImplementedError('--include is not supported')
+    if opts['subrepos']:
+        raise NotImplementedError('--subrepos is not supported')
+    force = opts['force'] or False
+    return _remove(repo.root, repo.dirstate, paths, force, repo.getcwd())
+
+
+def _remove(root, dirstate, paths, force, cwd):
+    paths_to_remove = map(lambda p: pathutil.canonpath(root, cwd, p), paths)
+    errors = dirstate.thrift_scm_remove(paths_to_remove, force)
+    if len(errors):
+        for error in errors:
+            print(error.errorMessage)
+        return 1
+    return 0

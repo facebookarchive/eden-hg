@@ -37,6 +37,9 @@ class LameThriftClient(object):
     def scmAdd(self, mount_point, path):
         return self._call(['scmAdd', mount_point, path])
 
+    def scmRemove(self, mount_point, paths, force):
+        return self._call(['scmRemove', mount_point, repr(paths), str(force)])
+
     def scmGetStatus(self, mount_point):
         return self._call(['scmGetStatus', mount_point])
 
@@ -162,6 +165,13 @@ class ThriftHgStatusCode(object):
         "NOT_TRACKED": 5,
         "IGNORED": 6,
     }
+
+
+class ScmRemoveError(object):
+    def __init__(self, path, errorMessage):
+        self.path = path
+        self.errorMessage = errorMessage
+
 
 if __name__ == '__main__':
     '''This takes a single arg, which is an absolute path to an Eden mount.'''
