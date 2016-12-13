@@ -174,9 +174,6 @@ class EdenThriftClient(object):
         status = ClientStatus()
         thrift_hg_status = self._client.scmGetStatus(self._root)
         for path, code in thrift_hg_status.entries.iteritems():
-            # TODO(mbolin): Perform this filtering on the server.
-            if path.startswith('.hg/'):
-                continue
             if code == ThriftHgStatusCode.MODIFIED:
                 status.modified.append(path)
             elif code == ThriftHgStatusCode.ADDED:

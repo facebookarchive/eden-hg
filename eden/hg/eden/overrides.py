@@ -56,9 +56,6 @@ def _add(root, dirstate, paths, cwd):
             else:
                 raise
 
-    # TODO(mbolin): Decide where to filter files in the .hg folder. Presumably
-    # it should happen on the client rather than here in the server.
-
     # TODO(mbolin): Sort files_to_add before iterating over it?
     # TODO(mbolin): Consider supporting a batch API for thrift_scm_add().
     for path in files_to_add:
