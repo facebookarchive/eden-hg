@@ -192,14 +192,21 @@ class EdenThriftClient(object):
                 raise Exception('Unexpected status code: %s' % code)
         return status
 
-    def add(self, path):
-        '''path must be a normalized path relative to the repo root.'''
-        self._client.scmAdd(self._root, path)
-
-    def remove(self, paths, force):
-        '''paths must be normalized paths relative to the repo root.
+    def add(self, paths):
+        '''paths must be a normalized paths relative to the repo root.
 
         Note that each path in paths may refer to a file or a directory.
+
+        Returns a possibly empty list of errors to present to the user.
+        '''
+        return self._client.scmAdd(self._root, paths)
+
+    def remove(self, paths, force):
+        '''paths must be a normalized paths relative to the repo root.
+
+        Note that each path in paths may refer to a file or a directory.
+
+        Returns a possibly empty list of errors to present to the user.
         '''
         return self._client.scmRemove(self._root, paths, force)
 
@@ -236,14 +243,21 @@ class edendirstate(object):
 
         self._parentwriters = 0
 
-    def thrift_scm_add(self, path):
-        '''path must be a normalized path relative to the repo root.'''
-        self._client.add(path)
+    def thrift_scm_add(self, paths):
+        '''paths must be a normalized paths relative to the repo root.
+
+        Note that each path in paths may refer to a file or a directory.
+
+        Returns a possibly empty list of errors to present to the user.
+        '''
+        return self._client.add(paths)
 
     def thrift_scm_remove(self, paths, force):
         '''paths must be normalized paths relative to the repo root.
 
         Note that each path in paths may refer to a file or a directory.
+
+        Returns a possibly empty list of errors to present to the user.
         '''
         return self._client.remove(paths, force)
 
