@@ -22,7 +22,7 @@ from mercurial import (
 )
 from mercurial import dirstate as dirstate_mod
 
-from .LameThriftClient import create_thrift_client, ThriftHgStatusCode
+from .LameThriftClient import create_thrift_client, StatusCode
 
 '''
 In general, there are two appraoches we could take to implement subcommands like
@@ -174,19 +174,19 @@ class EdenThriftClient(object):
         status = ClientStatus()
         thrift_hg_status = self._client.scmGetStatus(self._root)
         for path, code in thrift_hg_status.entries.iteritems():
-            if code == ThriftHgStatusCode.MODIFIED:
+            if code == StatusCode.MODIFIED:
                 status.modified.append(path)
-            elif code == ThriftHgStatusCode.ADDED:
+            elif code == StatusCode.ADDED:
                 status.added.append(path)
-            elif code == ThriftHgStatusCode.REMOVED:
+            elif code == StatusCode.REMOVED:
                 status.removed.append(path)
-            elif code == ThriftHgStatusCode.MISSING:
+            elif code == StatusCode.MISSING:
                 status.deleted.append(path)
-            elif code == ThriftHgStatusCode.NOT_TRACKED:
+            elif code == StatusCode.NOT_TRACKED:
                 status.unknown.append(path)
-            elif code == ThriftHgStatusCode.IGNORED:
+            elif code == StatusCode.IGNORED:
                 status.ignored.append(path)
-            elif code == ThriftHgStatusCode.CLEAN:
+            elif code == StatusCode.CLEAN:
                 status.clean.append(path)
             else:
                 raise Exception('Unexpected status code: %s' % code)

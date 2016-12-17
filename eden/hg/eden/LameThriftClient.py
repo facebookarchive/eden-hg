@@ -142,7 +142,7 @@ class ThriftHgStatus(object):
         self.entries = entries
 
 
-class ThriftHgStatusCode(object):
+class StatusCode(object):
     CLEAN = 0
     MODIFIED = 1
     ADDED = 2
