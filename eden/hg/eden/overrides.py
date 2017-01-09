@@ -22,7 +22,7 @@ def add(orig, ui, repo, *paths, **opts):
         raise NotImplementedError('--include is not supported')
     if opts['subrepos']:
         raise NotImplementedError('--subrepos is not supported')
-    _add(repo.root, repo.dirstate, paths, repo.getcwd())
+    return _add(repo.root, repo.dirstate, paths, repo.getcwd())
 
 
 def _add(root, dirstate, paths, cwd):
