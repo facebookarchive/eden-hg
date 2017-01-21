@@ -1,4 +1,4 @@
-# Copyright (c) 2016, Facebook, Inc.
+# Copyright (c) 2016-present, Facebook, Inc.
 # All Rights Reserved.
 #
 # This software may be used and distributed according to the terms of the
