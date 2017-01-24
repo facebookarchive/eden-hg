@@ -68,25 +68,12 @@ class LameThriftClient(object):
 
 def create_thrift_client(eden_dir):
     this_dir = os.path.dirname(os.path.realpath(__file__))
-    while True:
-        if os.path.exists(os.path.join(this_dir, '.buckconfig')):
-            src_repo = this_dir
-            break
-        parent = os.path.dirname(this_dir)
-        if parent == this_dir:
-            raise Exception('repository root not found')
-        this_dir = parent
 
-    pyremote = os.path.join(
-        src_repo,
-        'buck-out/gen/eden/fs/service/thrift-EdenService-pyremote.par'
-    )
-
-    if not os.path.isfile(pyremote):
-        subprocess.check_call(
-            ['buck', 'build', '//eden/fs/service:thrift-EdenService-pyremote'],
-            cwd=src_repo
-        )
+    pyremote = os.environ.get(
+        'EDENFS_LAME_THRIFT_PAR',
+        os.path.join(this_dir, 'thrift-EdenService-pyremote.par'))
+    if not os.path.exists(pyremote):
+        raise Exception('Could not find pyremote: ' + pyremote)
 
     return LameThriftClient(pyremote, eden_dir)
 
