@@ -21,8 +21,8 @@ from mercurial import (
     commands, context, extensions, localrepo, pathutil, node, scmutil, util
 )
 from mercurial import dirstate as dirstate_mod
-
-from .LameThriftClient import create_thrift_client, StatusCode
+from mercurial.i18n import _
+import mercurial.demandimport
 
 '''
 In general, there are two appraoches we could take to implement subcommands like
@@ -42,6 +42,35 @@ overlay.
 from . import (
     overrides,
 )
+
+# Disable demandimport while importing thrift files.
+#
+# The thrift modules try importing modules which may or may not exist, and they
+# handle the ImportError generated if the modules aren't present.  demandimport
+# breaks this behavior by making it appear like the modules were successfully
+# loaded, and only throwing ImportError later when you actually try to use
+# them.
+with mercurial.demandimport.deactivated():
+    try:
+        import eden.thrift as eden_thrift_module
+        import facebook.eden.ttypes as eden_ttypes
+        _thrift_client_type = 'native'
+    except Exception:
+        # If we fail to import eden.thrift, fall back to using the
+        # LameThriftClient module for now.  At the moment we build the
+        # eden.thrift modules with fairly recent versions of gcc and glibc, but
+        # mercurial is often invoked with the system version of python, which
+        # cannot import modules compiled against newer glibc versions.
+        #
+        # Eventually this fallback should be removed once we make sure
+        # mercurial is always deployed to use our newer python builds.  For now
+        # it is in place to ease development.
+        from . import LameThriftClient as eden_thrift_module
+        eden_ttypes = eden_thrift_module
+        _thrift_client_type = 'lame'
+
+create_thrift_client = eden_thrift_module.create_thrift_client
+StatusCode = eden_ttypes.StatusCode
 
 _requirement = 'eden'
 _repoclass = localrepo.localrepository
@@ -69,6 +98,10 @@ def extsetup(ui):
     extensions.wrapcommand(commands.table, 'add', overrides.add)
     extensions.wrapcommand(commands.table, 'remove', overrides.remove)
     orig.paths = ()
+
+    if _thrift_client_type != 'native':
+        ui.warn(_('unable to import native thrift client for eden; '
+                  'falling back to pyremote invocation\n'))
 
 
 def invalidatedirstate(orig, self):
