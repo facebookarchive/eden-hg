@@ -66,16 +66,41 @@ class LameThriftClient(object):
         return eval(code)
 
 
-def create_thrift_client(eden_dir):
+def _find_pyremote_path():
+    path = os.environ.get('EDENFS_LAME_THRIFT_PAR')
+    if path:
+        if not os.path.exists(path):
+            raise Exception('Specified pyremote does not exist: ' + path)
+        return path
+
+    # Check in the current directory
     this_dir = os.path.dirname(os.path.realpath(__file__))
+    path = os.path.join(this_dir, 'thrift-EdenService-pyremote.par')
+    if os.path.exists(path):
+        return path
 
-    pyremote = os.environ.get(
-        'EDENFS_LAME_THRIFT_PAR',
-        os.path.join(this_dir, 'thrift-EdenService-pyremote.par'))
-    if not os.path.exists(pyremote):
-        raise Exception('Could not find pyremote: ' + pyremote)
+    # Look upwards to find it in a build directory
+    build_path = 'buck-out/gen/eden/fs/service/thrift-EdenService-pyremote.par'
+    while True:
+        path = os.path.join(this_dir, build_path)
+        if os.path.exists(path):
+            return path
 
-    return LameThriftClient(pyremote, eden_dir)
+        parent = os.path.dirname(this_dir)
+        if parent == this_dir:
+            raise Exception('Could not find eden pyremote binary')
+        this_dir = parent
+
+
+_pyremote_path = None
+
+
+def create_thrift_client(eden_dir):
+    global _pyremote_path
+    if _pyremote_path is None:
+        _pyremote_path = _find_pyremote_path()
+
+    return LameThriftClient(_pyremote_path, eden_dir)
 
 
 # !!! HAND-GENERATED PYTHON CLASSES BASED ON eden.thrift !!!
