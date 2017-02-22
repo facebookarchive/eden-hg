@@ -31,6 +31,14 @@ class LameThriftClient(object):
     def close(self):
         pass
 
+    def getCurrentSnapshot(self, mount_point):
+        result = self._call_binary(['getCurrentSnapshot', mount_point])
+        # There will be a trailing newline on the output.  Strip it off
+        if len(result) != 21:
+            raise Exception('unexpected output from getCurrentSnapshot(): %r' %
+                            result)
+        return result[:20]
+
     def getMaterializedEntries(self, mount_point):
         return self._call(['getMaterializedEntries', mount_point])
 
@@ -48,7 +56,7 @@ class LameThriftClient(object):
         return self._call(['scmMarkCommitted', mount_point, node,
                            repr(paths_to_clear), repr(paths_to_drop)])
 
-    def _call(self, api_args):
+    def _call_binary(self, api_args):
         proc = subprocess.Popen(
             [self._pyremote, '--path', self._eden_socket, '-f'] + api_args,
             stdout=subprocess.PIPE,
@@ -58,7 +66,10 @@ class LameThriftClient(object):
         if proc.returncode != 0:
             raise Exception('error making eden thrift call via pyremote: %r' %
                             (error,))
+        return output
 
+    def _call(self, api_args):
+        output = self._call_binary(api_args)
         # Make sure we compile without inheriting the flags used by the current
         # source file.  In particular we want to make sure the unicode_literals
         # flag is disabled.

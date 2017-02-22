@@ -196,8 +196,7 @@ class EdenThriftClient(object):
         Use mercurial.node.hex() to convert the return value into a
         40-character human-readable string.
         '''
-        # TODO: Use a more specific thrift API for this.
-        return self._getMaterializedEntries().currentPosition.snapshotHash
+        return self._client.getCurrentSnapshot(self._root)
 
     def setHgParents(self, p1, p2):
         # TODO: update the eden snapshot pointer
