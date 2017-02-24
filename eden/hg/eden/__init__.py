@@ -18,9 +18,11 @@ from __future__ import print_function
 import os
 
 from mercurial import (
-    commands, context, extensions, localrepo, pathutil, node, scmutil, util
+    commands, context, error, extensions, localrepo, pathutil, node, scmutil,
+    util
 )
-from mercurial import dirstate as dirstate_mod
+from mercurial import dirstate as dirstatemod
+from mercurial import merge as mergemod
 from mercurial.i18n import _
 import mercurial.demandimport
 
@@ -71,6 +73,7 @@ with mercurial.demandimport.deactivated():
 
 create_thrift_client = eden_thrift_module.create_thrift_client
 StatusCode = eden_ttypes.StatusCode
+ConflictType = eden_ttypes.ConflictType
 
 _requirement = 'eden'
 _repoclass = localrepo.localrepository
@@ -94,6 +97,7 @@ def extsetup(ui):
                             invalidatedirstate)
     extensions.wrapfunction(context.committablectx, 'markcommitted',
                             mark_committed)
+    extensions.wrapfunction(mergemod, 'update', merge_update)
     extensions.wrapfunction(orig, 'func', wrapdirstate)
     extensions.wrapcommand(commands.table, 'add', overrides.add)
     extensions.wrapcommand(commands.table, 'remove', overrides.remove)
@@ -138,6 +142,155 @@ def mark_committed(orig, self, node):
         self._repo.currenttransaction().addpostclose('commit', callback)
     else:
         orig(self, node)
+
+
+def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
+                 mergeancestor=False, labels=None, matcher=None,
+                 mergeforce=False):
+    assert node is not None
+
+    if not util.safehasattr(repo.dirstate, 'eden_client'):
+        # This is not an eden repository
+        useeden = False
+    if matcher is not None and not matcher.always():
+        # We don't support doing a partial update through eden yet.
+        useeden = False
+    elif branchmerge or ancestor is not None:
+        useeden = False
+    else:
+        # TODO: We probably also need to set useeden = False if there are
+        # subrepositories.  (Personally I might vote for just not supporting
+        # subrepos in eden.)
+        useeden = True
+
+    if not useeden:
+        repo.ui.debug("falling back to non-eden update code path")
+        return orig(repo, node, branchmerge, force, ancestor=ancestor,
+                    mergeancestor=mergeancestor, labels=labels, matcher=matcher,
+                    mergeforce=mergeforce)
+
+    with repo.wlock():
+        wctx = repo[None]
+        parents = wctx.parents()
+
+        p1ctx = parents[0]
+        destctx = repo[node]
+        deststr = str(destctx)
+
+        if not force:
+            # Make sure there isn't an outstanding merge or unresolved files.
+            if len(parents) > 1:
+                raise error.Abort(_("outstanding uncommitted merge"))
+            ms = mergemod.mergestate.read(repo)
+            if list(ms.unresolved()):
+                raise error.Abort(_("outstanding merge conflicts"))
+
+            # The vanilla merge code disallows updating between two unrelated
+            # branches if the working directory is dirty.  I don't really see a
+            # good reason to disallow this; it should be treated the same as if
+            # we committed the changes, checked out the other branch then tried
+            # to graft the changes here.
+
+        # Invoke the preupdate hook
+        repo.hook('preupdate', throw=True, parent1=deststr, parent2='')
+        # note that we're in the middle of an update
+        repo.vfs.write('updatestate', destctx.hex())
+
+        # Ask eden to perform the checkout
+        if p1ctx != destctx:
+            conflicts = repo.dirstate.eden_client.checkout(destctx, force=force)
+        else:
+            conflicts = None
+
+        # Handle any conflicts
+        #
+        # The stats returned are numbers of files affected:
+        #   (updated, merged, removed, unresolved)
+        #
+        # TODO: The updated and removed file count here will always be 0.  We
+        # could have eden report the number of updated and removed files.
+        # However, this won't ever really be accurate, since the whole point of
+        # eden is that we don't have to process the entire repository file
+        # list.
+        if conflicts:
+            stats = _handleupdateconflicts(repo, wctx, p1ctx, destctx, labels,
+                                           conflicts, force)
+        else:
+            stats = 0, 0, 0, 0
+
+        # Clear the update state
+        util.unlink(repo.join('updatestate'))
+
+    # Invoke the update hook
+    repo.hook('update', parent1=deststr, parent2='', error=stats[3])
+
+    return stats
+
+
+def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
+    # When resolving conflicts during an update operation, the working
+    # directory (wctx) is one side of the merge, the destination commit (dest)
+    # is the other side of the merge, and the source commit (src) is treated as
+    # the common ancestor.
+    #
+    # This is what we want with respect to the graph topology.  If we are
+    # updating from commit A (src) to B (dest), and the real ancestor is C, we
+    # effectively treat the update operation as reverting all commits from A to
+    # C, then applying the commits from C to B.  We are then trying to re-apply
+    # the local changes in the working directory (against A) to the new
+    # location B.  Using A as the common ancestor in this operation is the
+    # desired behavior.
+
+    # Build a list of actions to pass to mergemod.applyupdates()
+    actions = dict((m, []) for m in 'a am f g cd dc r dm dg m e k'.split())
+    numerrors = 0
+    for conflict in conflicts:
+        # The action tuple is:
+        # - path_in_1, path_in_2, path_in_ancestor, move, ancestor_node
+
+        if conflict.type == ConflictType.ERROR:
+            # We don't record this as a conflict for now.
+            # We will report the error, but the file will show modified in
+            # the working directory status after the update returns.
+            repo.ui.write_err(_('error updating %s: %s\n') %
+                              (conflict.path, conflict.message))
+            numerrors += 1
+            continue
+        elif conflict.type == ConflictType.MODIFIED_REMOVED:
+            action_type = 'cd'
+            action = (conflict.path, None, conflict.path, False, src.node())
+            prompt = "prompt changed/deleted"
+        elif conflict.type == ConflictType.UNTRACKED_ADDED:
+            action_type = 'c'
+            action = (dest.manifest().flags(conflict.path),)
+            prompt = "remote created"
+        elif conflict.type == ConflictType.REMOVED_MODIFIED:
+            action_type = 'dc'
+            action = (None, conflict.path, conflict.path, False, src.node())
+            prompt = "prompt deleted/changed"
+        elif conflict.type == ConflictType.MISSING_REMOVED:
+            # Nothing to do here really.  The file was already removed
+            # locally in the working directory before, and it was removed
+            # in the new commit.
+            continue
+        elif conflict.type == ConflictType.MODIFIED:
+            action_type = 'm'
+            action = (conflict.path, conflict.path, conflict.path,
+                      False, src.node())
+            prompt = "versions differ"
+        else:
+            raise Exception('unknown conflict type received from eden: '
+                            '%r, %r, %r' % (conflict.type, conflict.path,
+                                            conflict.message))
+
+        actions[action_type].append((conflict.path, action, prompt))
+
+    # Call applyupdates
+    stats = mergemod.applyupdates(repo, actions, wctx, dest, force, labels)
+
+    # Add the error count to the number of unresolved files.
+    # This ensures we exit unsuccessfully if there were any errors
+    return (stats[0], stats[1], stats[2], stats[3] + numerrors)
 
 
 def reposetup(ui, repo):
@@ -246,6 +399,9 @@ class EdenThriftClient(object):
         self._client.scmMarkCommitted(self._root, node, paths_to_clear,
                                       paths_to_drop)
 
+    def checkout(self, node, force):
+        return self._client.checkOutRevision(self._root, node.hex(), force)
+
 
 class edendirstate(object):
     '''
@@ -261,7 +417,7 @@ class edendirstate(object):
     '''
     def __init__(self, repo, ui, root):
         self._repo = repo
-        self._client = EdenThriftClient(repo)
+        self.eden_client = EdenThriftClient(repo)
         self._ui = ui
         self._root = root
         self._rootdir = pathutil.normasprefix(root)
@@ -270,7 +426,7 @@ class edendirstate(object):
         # Store a vanilla dirstate object, so we can re-use some of its
         # functionality in a handful of cases.  Primarily this is just for cwd
         # and path computation.
-        self._normaldirstate = dirstate_mod.dirstate(
+        self._normaldirstate = dirstatemod.dirstate(
             opener=None, ui=self._ui, root=self._root, validate=None)
 
         self._parentwriters = 0
@@ -282,7 +438,7 @@ class edendirstate(object):
 
         Returns a possibly empty list of errors to present to the user.
         '''
-        return self._client.add(paths)
+        return self.eden_client.add(paths)
 
     def thrift_scm_remove(self, paths, force):
         '''paths must be normalized paths relative to the repo root.
@@ -291,7 +447,7 @@ class edendirstate(object):
 
         Returns a possibly empty list of errors to present to the user.
         '''
-        return self._client.remove(paths, force)
+        return self.eden_client.remove(paths, force)
 
     def beginparentchange(self):
         self._parentwriters += 1
@@ -379,7 +535,7 @@ class edendirstate(object):
 
     def _get_current_node_id(self):
         if not self._current_node_id:
-            self._current_node_id = self._client.getCurrentNodeID()
+            self._current_node_id = self.eden_client.getCurrentNodeID()
         return self._current_node_id
 
     def p1(self):
@@ -393,7 +549,7 @@ class edendirstate(object):
         return 'default'
 
     def mark_committed(self, node, paths_to_clear, paths_to_drop):
-        self._client.mark_committed(node, paths_to_clear, paths_to_drop)
+        self.eden_client.mark_committed(node, paths_to_clear, paths_to_drop)
 
     def setparents(self, p1, p2=node.nullid):
         """Set dirstate parents to p1 and p2."""
@@ -401,7 +557,7 @@ class edendirstate(object):
             raise ValueError("cannot set dirstate parent without "
                              "calling dirstate.beginparentchange")
 
-        self._client.setHgParents(p1, p2)
+        self.eden_client.setHgParents(p1, p2)
 
     def setbranch(self, branch):
         raise NotImplementedError('edendirstate.setbranch()')
@@ -505,7 +661,7 @@ class edendirstate(object):
         # We should never have any files we are unsure about
         unsure = []
 
-        edenstatus = self._client.getStatus()
+        edenstatus = self.eden_client.getStatus()
 
         status = scmutil.status(edenstatus.modified,
                                 edenstatus.added,

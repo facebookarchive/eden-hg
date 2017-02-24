@@ -39,6 +39,10 @@ class LameThriftClient(object):
                             result)
         return result[:20]
 
+    def checkOutRevision(self, mountPoint, snapshotHash, force):
+        return self._call(['checkOutRevision', mountPoint, snapshotHash,
+                           str(force)])
+
     def getMaterializedEntries(self, mount_point):
         return self._call(['getMaterializedEntries', mount_point])
 
@@ -70,6 +74,10 @@ class LameThriftClient(object):
 
     def _call(self, api_args):
         output = self._call_binary(api_args)
+        if output.startswith('Exception:\n'):
+            msg = output[len('Exception:\n'):]
+            raise Exception(msg)
+
         # Make sure we compile without inheriting the flags used by the current
         # source file.  In particular we want to make sure the unicode_literals
         # flag is disabled.
@@ -154,6 +162,44 @@ class FileInformation(object):
         self.mode = mode
 
 
+class CheckoutConflict(object):
+    def __init__(self, path, type, message):
+        self.path = path
+        self.type = type
+        self.message = message
+
+
+def _define_enum(*args, **kwargs):
+    class EnumClass(object):
+        _NAMES_TO_VALUES = {}
+        _VALUES_TO_NAMES = {}
+
+    def define_value(k, v):
+        assert v not in EnumClass._VALUES_TO_NAMES
+        setattr(EnumClass, k, v)
+        EnumClass._NAMES_TO_VALUES[k] = v
+        EnumClass._VALUES_TO_NAMES[v] = k
+
+    auto_value = 0
+    for k in args:
+        define_value(k, auto_value)
+        auto_value += 1
+
+    for k, v in kwargs.items():
+        define_value(k, v)
+
+    return EnumClass
+
+
+ConflictType = _define_enum(
+    'ERROR',
+    'MODIFIED_REMOVED',
+    'UNTRACKED_ADDED',
+    'REMOVED_MODIFIED',
+    'MISSING_REMOVED',
+    'MODIFIED')
+
+
 class TimeSpec(object):
     def __init__(self, seconds, nanoSeconds):
         self._seconds = seconds
@@ -165,34 +211,14 @@ class ThriftHgStatus(object):
         self.entries = entries
 
 
-class StatusCode(object):
-    CLEAN = 0
-    MODIFIED = 1
-    ADDED = 2
-    REMOVED = 3
-    MISSING = 4
-    NOT_TRACKED = 5
-    IGNORED = 6
-
-    _VALUES_TO_NAMES = {
-        0: "CLEAN",
-        1: "MODIFIED",
-        2: "ADDED",
-        3: "REMOVED",
-        4: "MISSING",
-        5: "NOT_TRACKED",
-        6: "IGNORED",
-    }
-
-    _NAMES_TO_VALUES = {
-        "CLEAN": 0,
-        "MODIFIED": 1,
-        "ADDED": 2,
-        "REMOVED": 3,
-        "MISSING": 4,
-        "NOT_TRACKED": 5,
-        "IGNORED": 6,
-    }
+StatusCode = _define_enum(
+    'CLEAN',
+    'MODIFIED',
+    'ADDED',
+    'REMOVED',
+    'MISSING',
+    'NOT_TRACKED',
+    'IGNORED')
 
 
 class ScmAddRemoveError(object):
