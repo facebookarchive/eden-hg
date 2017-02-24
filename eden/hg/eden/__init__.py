@@ -18,8 +18,8 @@ from __future__ import print_function
 import os
 
 from mercurial import (
-    commands, context, error, extensions, localrepo, pathutil, node, scmutil,
-    util
+    commands, context, error, extensions, hg, localrepo, pathutil, node,
+    scmutil, util
 )
 from mercurial import dirstate as dirstatemod
 from mercurial import merge as mergemod
@@ -98,6 +98,7 @@ def extsetup(ui):
     extensions.wrapfunction(context.committablectx, 'markcommitted',
                             mark_committed)
     extensions.wrapfunction(mergemod, 'update', merge_update)
+    extensions.wrapfunction(hg, '_showstats', update_showstats)
     extensions.wrapfunction(orig, 'func', wrapdirstate)
     extensions.wrapcommand(commands.table, 'add', overrides.add)
     extensions.wrapcommand(commands.table, 'remove', overrides.remove)
@@ -203,15 +204,9 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
             conflicts = None
 
         # Handle any conflicts
-        #
         # The stats returned are numbers of files affected:
         #   (updated, merged, removed, unresolved)
-        #
-        # TODO: The updated and removed file count here will always be 0.  We
-        # could have eden report the number of updated and removed files.
-        # However, this won't ever really be accurate, since the whole point of
-        # eden is that we don't have to process the entire repository file
-        # list.
+        # The updated and removed file counts will always be 0 in our case.
         if conflicts:
             stats = _handleupdateconflicts(repo, wctx, p1ctx, destctx, labels,
                                            conflicts, force)
@@ -225,6 +220,18 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
     repo.hook('update', parent1=deststr, parent2='', error=stats[3])
 
     return stats
+
+
+def update_showstats(orig, repo, stats, quietempty=False):
+    # We hide the updated and removed counts, because they are not accurate
+    # with eden.  One of the primary goals of eden is that the entire working
+    # directory does not need to be accessed or traversed on update operations.
+    (updated, merged, removed, unresolved) = stats
+    if merged or unresolved:
+        repo.ui.status(_('%d files merged, %d files unresolved\n') %
+                       (merged, unresolved))
+    elif not quietempty:
+        repo.ui.status(_('update complete\n'))
 
 
 def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
