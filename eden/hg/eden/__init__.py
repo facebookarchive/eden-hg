@@ -345,9 +345,6 @@ class EdenThriftClient(object):
         # close the client appropriately.
         self._client.open()
 
-    def _getMaterializedEntries(self):
-        return self._client.getMaterializedEntries(self._root)
-
     def getCurrentNodeID(self):
         '''
         Returns the ID of the working directory's parent comment, as a

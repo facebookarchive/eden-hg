@@ -43,9 +43,6 @@ class LameThriftClient(object):
         return self._call(['checkOutRevision', mountPoint, snapshotHash,
                            str(force)])
 
-    def getMaterializedEntries(self, mount_point):
-        return self._call(['getMaterializedEntries', mount_point])
-
     def scmAdd(self, mount_point, paths):
         return self._call(['scmAdd', mount_point, repr(paths)])
 
@@ -125,20 +122,6 @@ def create_thrift_client(eden_dir):
 # !!! HAND-GENERATED PYTHON CLASSES BASED ON eden.thrift !!!
 # See buck-out/gen/eden/fs/service/thrift-py-eden.thrift/gen-py/facebook/eden/ttypes.py
 # for real Python codegen.
-class MaterializedResult(object):
-    def __init__(self, currentPosition, fileInfo):
-        self.currentPosition = currentPosition
-        self.fileInfo = fileInfo  # map<string, FileInformation>
-
-    def __str__(self):
-        return repr(
-            {
-                'currentPosition': str(self.currentPosition),
-                'fileInfo': self.fileInfo,
-            }
-        )
-
-
 class JournalPosition(object):
     def __init__(self, snapshotHash, mountGeneration, sequenceNumber):
         self.snapshotHash = snapshotHash
@@ -225,24 +208,3 @@ class ScmAddRemoveError(object):
     def __init__(self, path, errorMessage):
         self.path = path
         self.errorMessage = errorMessage
-
-
-if __name__ == '__main__':
-    '''This takes a single arg, which is an absolute path to an Eden mount.'''
-    import sys
-    eden_mount = sys.argv[1]
-    eden_dir = os.path.join(os.environ['HOME'], 'local/.eden')
-    client = create_thrift_client(eden_dir)
-    materialized_result = client.getMaterializedEntries(eden_mount)
-
-    quote_fn = None
-    try:
-        import pipes
-        quote_fn = pipes.quote
-    except (ImportError, AttributeError):
-        import shlex
-        quote_fn = shlex.quote
-
-    for filename in materialized_result.fileInfo:
-        # Use quoting to make it obvious that the empty string is an entry.
-        print(quote_fn(filename))
