@@ -145,9 +145,12 @@ def mark_committed(orig, self, node):
         orig(self, node)
 
 
+# This function replaces the update() function in mercurial's mercurial.merge
+# module.   It's signature must match the original mercurial.merge.update()
+# function.
 def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
                  mergeancestor=False, labels=None, matcher=None,
-                 mergeforce=False):
+                 mergeforce=False, updatecheck=None):
     assert node is not None
 
     if not util.safehasattr(repo.dirstate, 'eden_client'):
@@ -198,7 +201,7 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
         repo.vfs.write('updatestate', destctx.hex())
 
         # Ask eden to perform the checkout
-        if p1ctx != destctx:
+        if force or p1ctx != destctx:
             conflicts = repo.dirstate.eden_client.checkout(destctx, force=force)
         else:
             conflicts = None
@@ -207,14 +210,14 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
         # The stats returned are numbers of files affected:
         #   (updated, merged, removed, unresolved)
         # The updated and removed file counts will always be 0 in our case.
-        if conflicts:
+        if conflicts and not force:
             stats = _handleupdateconflicts(repo, wctx, p1ctx, destctx, labels,
-                                           conflicts, force)
+                                           conflicts)
         else:
             stats = 0, 0, 0, 0
 
         # Clear the update state
-        util.unlink(repo.join('updatestate'))
+        util.unlink(repo.vfs.join('updatestate'))
 
     # Invoke the update hook
     repo.hook('update', parent1=deststr, parent2='', error=stats[3])
@@ -234,7 +237,7 @@ def update_showstats(orig, repo, stats, quietempty=False):
         repo.ui.status(_('update complete\n'))
 
 
-def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
+def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts):
     # When resolving conflicts during an update operation, the working
     # directory (wctx) is one side of the merge, the destination commit (dest)
     # is the other side of the merge, and the source commit (src) is treated as
@@ -293,7 +296,8 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
         actions[action_type].append((conflict.path, action, prompt))
 
     # Call applyupdates
-    stats = mergemod.applyupdates(repo, actions, wctx, dest, force, labels)
+    stats = mergemod.applyupdates(repo, actions, wctx, dest,
+                                  overwrite=False, labels=labels)
 
     # Add the error count to the number of unresolved files.
     # This ensures we exit unsuccessfully if there were any errors
