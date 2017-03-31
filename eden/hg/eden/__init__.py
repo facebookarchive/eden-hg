@@ -359,9 +359,9 @@ class EdenThriftClient(object):
         # TODO: update the eden snapshot pointer
         raise NotImplementedError('edendirstate.setparents()')
 
-    def getStatus(self):
+    def getStatus(self, list_ignored):
         status = ClientStatus()
-        thrift_hg_status = self._client.scmGetStatus(self._root)
+        thrift_hg_status = self._client.scmGetStatus(self._root, list_ignored)
         for path, code in thrift_hg_status.entries.iteritems():
             if code == StatusCode.MODIFIED:
                 status.modified.append(path)
@@ -665,7 +665,7 @@ class edendirstate(object):
         # We should never have any files we are unsure about
         unsure = []
 
-        edenstatus = self.eden_client.getStatus()
+        edenstatus = self.eden_client.getStatus(ignored)
 
         status = scmutil.status(edenstatus.modified,
                                 edenstatus.added,

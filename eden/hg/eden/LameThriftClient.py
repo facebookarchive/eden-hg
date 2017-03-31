@@ -31,8 +31,8 @@ class LameThriftClient(object):
     def close(self):
         pass
 
-    def getCurrentSnapshot(self, mount_point):
-        result = self._call_binary(['getCurrentSnapshot', mount_point])
+    def getCurrentSnapshot(self, mountPoint):
+        result = self._call_binary(['getCurrentSnapshot', mountPoint])
         # There will be a trailing newline on the output.  Strip it off
         if len(result) != 21:
             raise Exception('unexpected output from getCurrentSnapshot(): %r' %
@@ -43,19 +43,19 @@ class LameThriftClient(object):
         return self._call(['checkOutRevision', mountPoint, snapshotHash,
                            str(force)])
 
-    def scmAdd(self, mount_point, paths):
-        return self._call(['scmAdd', mount_point, repr(paths)])
+    def scmAdd(self, mountPoint, paths):
+        return self._call(['scmAdd', mountPoint, repr(paths)])
 
-    def scmRemove(self, mount_point, paths, force):
-        return self._call(['scmRemove', mount_point, repr(paths), str(force)])
+    def scmRemove(self, mountPoint, paths, force):
+        return self._call(['scmRemove', mountPoint, repr(paths), str(force)])
 
-    def scmGetStatus(self, mount_point):
-        return self._call(['scmGetStatus', mount_point])
+    def scmGetStatus(self, mountPoint, listIgnored):
+        return self._call(['scmGetStatus', mountPoint, repr(listIgnored)])
 
-    def scmMarkCommitted(self, mount_point, node, paths_to_clear,
-                         paths_to_drop):
-        return self._call(['scmMarkCommitted', mount_point, node,
-                           repr(paths_to_clear), repr(paths_to_drop)])
+    def scmMarkCommitted(self, mountPoint, commitID, pathsToClean,
+                         pathsToDrop):
+        return self._call(['scmMarkCommitted', mountPoint, commitID,
+                           repr(pathsToClean), repr(pathsToDrop)])
 
     def _call_binary(self, api_args):
         proc = subprocess.Popen(
