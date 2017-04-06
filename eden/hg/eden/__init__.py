@@ -341,10 +341,7 @@ class ClientStatus(object):
 class EdenThriftClient(object):
     def __init__(self, repo):
         self._root = repo.root
-        # TODO: Find the correct socket path based on the mount point,
-        # rather than assuming it is always ~/local/.eden
-        eden_dir = os.path.join(os.environ['HOME'], 'local/.eden')
-        self._client = create_thrift_client(eden_dir)
+        self._client = create_thrift_client(mounted_path=self._root)
         # TODO: It would be nicer to use a context manager to make sure we
         # close the client appropriately.
         self._client.open()

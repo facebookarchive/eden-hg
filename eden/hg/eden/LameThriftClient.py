@@ -21,9 +21,12 @@ import subprocess
 
 
 class LameThriftClient(object):
-    def __init__(self, pyremote, eden_dir):
+    def __init__(self, pyremote, eden_dir=None, mounted_path=None):
         self._pyremote = pyremote
-        self._eden_socket = os.path.join(eden_dir, 'socket')
+        if mounted_path:
+            self._eden_socket = os.path.join(mounted_path, '.eden', 'socket')
+        else:
+            self._eden_socket = os.path.join(eden_dir, 'socket')
 
     def open(self):
         pass
@@ -111,12 +114,14 @@ def _find_pyremote_path():
 _pyremote_path = None
 
 
-def create_thrift_client(eden_dir):
+def create_thrift_client(eden_dir=None, mounted_path=None):
     global _pyremote_path
     if _pyremote_path is None:
         _pyremote_path = _find_pyremote_path()
 
-    return LameThriftClient(_pyremote_path, eden_dir)
+    return LameThriftClient(_pyremote_path,
+                            eden_dir=eden_dir,
+                            mounted_path=mounted_path)
 
 
 # !!! HAND-GENERATED PYTHON CLASSES BASED ON eden.thrift !!!
