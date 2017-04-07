@@ -46,6 +46,9 @@ class LameThriftClient(object):
         return self._call(['checkOutRevision', mountPoint, snapshotHash,
                            str(force)])
 
+    def resetParentCommit(self, mountPoint, snapshotHash):
+        return self._call(['resetParentCommit', mountPoint, snapshotHash])
+
     def scmAdd(self, mountPoint, paths):
         return self._call(['scmAdd', mountPoint, repr(paths)])
 

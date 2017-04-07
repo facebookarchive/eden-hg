@@ -358,8 +358,12 @@ class EdenThriftClient(object):
         return self._client.getCurrentSnapshot(self._root)
 
     def setHgParents(self, p1, p2):
-        # TODO: update the eden snapshot pointer
-        raise NotImplementedError('edendirstate.setparents()')
+        if p2 is not None and p2 != node.nullid:
+            # TODO
+            raise NotImplementedError('eden does not yet support multiple '
+                                      'working directory parents')
+
+        self._client.resetParentCommit(self._root, p1)
 
     def getStatus(self, list_ignored):
         status = ClientStatus()
@@ -643,8 +647,12 @@ class edendirstate(object):
         raise NotImplementedError('edendirstate.clear()')
 
     def rebuild(self, parent, allfiles, changedfiles=None):
-        # Probably don't ever need to rebuild the dirstate with eden?
-        raise NotImplementedError('edendirstate.rebuild()')
+        # We don't ever need to rebuild file status with eden, all we need to
+        # do is reset the parent commit of the working directory.
+        #
+        # TODO: It would be nicer if we could update the higher-level code so
+        # it doesn't even bother computing allfiles and changedfiles.
+        self.eden_client.setHgParents(parent, node.nullid)
 
     def write(self, tr):
         # TODO: write the data if it is dirty
