@@ -202,7 +202,8 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
 
         # Ask eden to perform the checkout
         if force or p1ctx != destctx:
-            conflicts = repo.dirstate.eden_client.checkout(destctx, force=force)
+            conflicts = repo.dirstate.eden_client.checkout(
+                destctx.node(), force=force)
         else:
             conflicts = None
 
@@ -405,7 +406,7 @@ class EdenThriftClient(object):
                                       paths_to_drop)
 
     def checkout(self, node, force):
-        return self._client.checkOutRevision(self._root, node.hex(), force)
+        return self._client.checkOutRevision(self._root, node, force)
 
 
 class edendirstate(object):
