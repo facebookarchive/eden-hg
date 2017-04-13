@@ -314,9 +314,8 @@ def reposetup(ui, repo):
 
 def wrapdirstate(orig, repo):
     # Only override when actually inside an eden client directory.
-    # TODO: Actually check this properly.
-    is_eden = True
-    if not is_eden:
+    doteden = repo.wvfs.join('.eden')
+    if not os.path.isdir(doteden):
         return orig(repo)
 
     # For now we intentionally do not derive from the original dirstate class.
