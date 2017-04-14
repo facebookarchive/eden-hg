@@ -17,6 +17,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import os
+import pickle
 import subprocess
 
 
@@ -64,12 +65,14 @@ class LameThriftClient(object):
                            repr(pathsToClean), repr(pathsToDrop)])
 
     def _call_binary(self, api_args):
+
         proc = subprocess.Popen(
-            [self._pyremote, '--path', self._eden_socket, '-f'] + api_args,
+            [self._pyremote, '--path', self._eden_socket, '-f', '--stdin', api_args[0]],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE,
         )
-        output, error = proc.communicate()
+        output, error = proc.communicate(pickle.dumps(api_args[1:]))
         if proc.returncode != 0:
             raise Exception('error making eden thrift call via pyremote: %r' %
                             (error,))
