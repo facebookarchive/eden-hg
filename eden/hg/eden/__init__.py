@@ -16,6 +16,7 @@ from __future__ import division
 from __future__ import print_function
 
 import os
+import sys
 
 from mercurial import (
     commands, context, error, extensions, hg, localrepo, pathutil, node,
@@ -54,6 +55,9 @@ from . import (
 # them.
 with mercurial.demandimport.deactivated():
     try:
+        # Force the fb-specific installed path for the native thrift client
+        # into the python path.  Not super pretty, but functional!
+        sys.path.insert(0, '/usr/local/fb-mercurial/eden')
         import eden.thrift as eden_thrift_module
         import facebook.eden.ttypes as eden_ttypes
         _thrift_client_type = 'native'
