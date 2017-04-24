@@ -55,9 +55,19 @@ from . import (
 # them.
 with mercurial.demandimport.deactivated():
     try:
-        # Force the fb-specific installed path for the native thrift client
-        # into the python path.  Not super pretty, but functional!
-        sys.path.insert(0, '/usr/local/fb-mercurial/eden')
+        # The native thrift code requires a new enough version of python
+        # where struct.pack() accepts format strings as unicode.
+        if sys.version_info < (2, 7, 6):
+            raise Exception('python version is too old to use '
+                            'the native thrift client')
+
+        # Look for the native thrift client relative to our local file.
+        #
+        # Our file should be "hgext3rd/eden/__init__.py", inside a directory
+        # that also contains the other thrift modules required to talk to eden.
+        archive_root = os.path.normpath(os.path.join(__file__, '../../..'))
+        sys.path.insert(0, archive_root)
+
         import eden.thrift as eden_thrift_module
         import facebook.eden.ttypes as eden_ttypes
         _thrift_client_type = 'native'
