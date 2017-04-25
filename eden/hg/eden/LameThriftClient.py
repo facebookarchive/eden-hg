@@ -59,11 +59,6 @@ class LameThriftClient(object):
     def scmGetStatus(self, mountPoint, listIgnored):
         return self._call(['scmGetStatus', mountPoint, repr(listIgnored)])
 
-    def scmMarkCommitted(self, mountPoint, commitID, pathsToClean,
-                         pathsToDrop):
-        return self._call(['scmMarkCommitted', mountPoint, commitID,
-                           repr(pathsToClean), repr(pathsToDrop)])
-
     def _call_binary(self, api_args):
 
         proc = subprocess.Popen(

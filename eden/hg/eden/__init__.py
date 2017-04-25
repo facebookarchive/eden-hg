@@ -149,9 +149,7 @@ def mark_committed(orig, self, node):
         def callback(tr):
             dirstate = self._repo.dirstate
             dirstate.beginparentchange()
-            paths_to_clear = self.modified() + self.added()
-            paths_to_drop = self.removed()
-            dirstate.mark_committed(node, paths_to_clear, paths_to_drop)
+            dirstate.setparents(node)
             dirstate.endparentchange()
 
         self._repo.currenttransaction().addpostclose('commit', callback)
@@ -328,8 +326,7 @@ def reposetup(ui, repo):
 
 def wrapdirstate(orig, repo):
     # Only override when actually inside an eden client directory.
-    doteden = repo.wvfs.join('.eden')
-    if not os.path.isdir(doteden):
+    if _requirement not in repo.requirements:
         return orig(repo)
 
     # For now we intentionally do not derive from the original dirstate class.
@@ -417,10 +414,6 @@ class EdenThriftClient(object):
         Returns a possibly empty list of errors to present to the user.
         '''
         return self._client.scmRemove(self._root, paths, force)
-
-    def mark_committed(self, node, paths_to_clear, paths_to_drop):
-        self._client.scmMarkCommitted(self._root, node, paths_to_clear,
-                                      paths_to_drop)
 
     def checkout(self, node, force):
         return self._client.checkOutRevision(self._root, node, force)
@@ -570,9 +563,6 @@ class edendirstate(object):
 
     def branch(self):
         return 'default'
-
-    def mark_committed(self, node, paths_to_clear, paths_to_drop):
-        self.eden_client.mark_committed(node, paths_to_clear, paths_to_drop)
 
     def setparents(self, p1, p2=node.nullid):
         """Set dirstate parents to p1 and p2."""
