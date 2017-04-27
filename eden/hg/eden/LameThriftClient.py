@@ -16,8 +16,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import json
 import os
-import pickle
 import subprocess
 
 
@@ -36,7 +36,7 @@ class LameThriftClient(object):
         pass
 
     def getCurrentSnapshot(self, mountPoint):
-        result = self._call_binary(['getCurrentSnapshot', mountPoint])
+        result = self._call_binary('getCurrentSnapshot', mountPoint)
         # There will be a trailing newline on the output.  Strip it off
         if len(result) != 21:
             raise Exception('unexpected output from getCurrentSnapshot(): %r' %
@@ -44,37 +44,40 @@ class LameThriftClient(object):
         return result[:20]
 
     def checkOutRevision(self, mountPoint, snapshotHash, force):
-        return self._call(['checkOutRevision', mountPoint, snapshotHash,
-                           str(force)])
+        return self._call('checkOutRevision', mountPoint, snapshotHash, force)
 
     def resetParentCommit(self, mountPoint, snapshotHash):
-        return self._call(['resetParentCommit', mountPoint, snapshotHash])
+        return self._call('resetParentCommit', mountPoint, snapshotHash)
 
     def scmAdd(self, mountPoint, paths):
-        return self._call(['scmAdd', mountPoint, repr(paths)])
+        return self._call('scmAdd', mountPoint, paths)
 
     def scmRemove(self, mountPoint, paths, force):
-        return self._call(['scmRemove', mountPoint, repr(paths), str(force)])
+        return self._call('scmRemove', mountPoint, paths, force)
 
     def scmGetStatus(self, mountPoint, listIgnored):
-        return self._call(['scmGetStatus', mountPoint, repr(listIgnored)])
+        return self._call('scmGetStatus', mountPoint, listIgnored)
 
-    def _call_binary(self, api_args):
-
+    def _call_binary(self, function, *function_args):
+        arg_data = json.dumps([repr(arg) for arg in function_args])
+        cmd = [
+            self._pyremote, '--path', self._eden_socket, '-f', '--stdin',
+            function,
+        ]
         proc = subprocess.Popen(
-            [self._pyremote, '--path', self._eden_socket, '-f', '--stdin', api_args[0]],
+            cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,
         )
-        output, error = proc.communicate(pickle.dumps(api_args[1:]))
+        output, error = proc.communicate(arg_data)
         if proc.returncode != 0:
             raise Exception('error making eden thrift call via pyremote: %r' %
                             (error,))
         return output
 
-    def _call(self, api_args):
-        output = self._call_binary(api_args)
+    def _call(self, function, *api_args):
+        output = self._call_binary(function, *api_args)
         if output.startswith('Exception:\n'):
             msg = output[len('Exception:\n'):]
             raise Exception(msg)
