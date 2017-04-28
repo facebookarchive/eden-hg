@@ -357,23 +357,26 @@ class EdenThriftClient(object):
         # close the client appropriately.
         self._client.open()
 
-    def getCurrentNodeID(self):
+    def getParentCommits(self):
         '''
-        Returns the ID of the working directory's parent comment, as a
-        20-byte binary value.
+        Returns a tuple containing the IDs of the working directory's parent
+        commits.
 
-        Use mercurial.node.hex() to convert the return value into a
-        40-character human-readable string.
+        The first element of the tuple is always a 20-byte binary value
+        containing the commit ID.
+
+        The second element of the tuple is None if there is only one parent,
+        or the second parent ID as a 20-byte binary value.
         '''
-        return self._client.getCurrentSnapshot(self._root)
+        parents = self._client.getParentCommits(self._root)
+        return (parents.parent1, parents.parent2)
 
     def setHgParents(self, p1, p2):
-        if p2 is not None and p2 != node.nullid:
-            # TODO
-            raise NotImplementedError('eden does not yet support multiple '
-                                      'working directory parents')
+        if p2 == node.nullid:
+            p2 = None
 
-        self._client.resetParentCommit(self._root, p1)
+        parents = eden_ttypes.WorkingDirectoryParents(parent1=p1, parent2=p2)
+        self._client.resetParentCommits(self._root, parents)
 
     def getStatus(self, list_ignored):
         status = ClientStatus()
@@ -437,7 +440,9 @@ class edendirstate(object):
         self._ui = ui
         self._root = root
         self._rootdir = pathutil.normasprefix(root)
-        self._current_node_id = None
+        # self._parents is a cache of the current parent node IDs.
+        # This is a tuple of 2 20-byte binary commit IDs, or None when unset.
+        self._parents = None
 
         # Store a vanilla dirstate object, so we can re-use some of its
         # functionality in a handful of cases.  Primarily this is just for cwd
@@ -546,20 +551,24 @@ class edendirstate(object):
     def iteritems(self):
         raise NotImplementedError('edendirstate.iteritems()')
 
-    def parents(self):
-        return [self.p1(), self.p2()]
+    def _getparents(self):
+        if self._parents is None:
+            p1, p2 = self.eden_client.getParentCommits()
+            if p2 is None:
+                p2 = node.nullid
+            self._parents = (p1, p2)
 
-    def _get_current_node_id(self):
-        if not self._current_node_id:
-            self._current_node_id = self.eden_client.getCurrentNodeID()
-        return self._current_node_id
+    def parents(self):
+        self._getparents()
+        return list(self._parents)
 
     def p1(self):
-        commit = self._get_current_node_id()
-        return self._repo._dirstatevalidate(commit)
+        self._getparents()
+        return self._parents[0]
 
     def p2(self):
-        return node.nullid
+        self._getparents()
+        return self._parents[1]
 
     def branch(self):
         return 'default'
@@ -593,7 +602,7 @@ class edendirstate(object):
         This method is also invoked when the lock is released if
         self.pendingparentchange() is True.
         '''
-        self._current_node_id = None
+        self._parents = None
 
     def copy(self, source, dest):
         """Mark dest as a copy of source. Unmark dest if source is None."""

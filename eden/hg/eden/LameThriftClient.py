@@ -35,19 +35,14 @@ class LameThriftClient(object):
     def close(self):
         pass
 
-    def getCurrentSnapshot(self, mountPoint):
-        result = self._call_binary('getCurrentSnapshot', mountPoint)
-        # There will be a trailing newline on the output.  Strip it off
-        if len(result) != 21:
-            raise Exception('unexpected output from getCurrentSnapshot(): %r' %
-                            result)
-        return result[:20]
+    def getParentCommits(self, mountPoint):
+        return self._call('getParentCommits', mountPoint)
 
     def checkOutRevision(self, mountPoint, snapshotHash, force):
         return self._call('checkOutRevision', mountPoint, snapshotHash, force)
 
-    def resetParentCommit(self, mountPoint, snapshotHash):
-        return self._call('resetParentCommit', mountPoint, snapshotHash)
+    def resetParentCommits(self, mountPoint, parents):
+        return self._call('resetParentCommits', mountPoint, parents)
 
     def scmAdd(self, mountPoint, paths):
         return self._call('scmAdd', mountPoint, paths)
@@ -131,6 +126,16 @@ def create_thrift_client(eden_dir=None, mounted_path=None):
 # !!! HAND-GENERATED PYTHON CLASSES BASED ON eden.thrift !!!
 # See buck-out/gen/eden/fs/service/thrift-py-eden.thrift/gen-py/facebook/eden/ttypes.py
 # for real Python codegen.
+class WorkingDirectoryParents(object):
+    def __init__(self, parent1=None, parent2=None,):
+        self.parent1 = parent1
+        self.parent2 = parent2
+
+    def __repr__(self):
+        return ('WorkingDirectoryParents(parent1=%r, parent2=%r)' %
+                (self.parent1, self.parent2))
+
+
 class JournalPosition(object):
     def __init__(self, snapshotHash, mountGeneration, sequenceNumber):
         self.snapshotHash = snapshotHash
