@@ -53,6 +53,17 @@ class LameThriftClient(object):
     def scmGetStatus(self, mountPoint, listIgnored):
         return self._call('scmGetStatus', mountPoint, listIgnored)
 
+    def scmMarkCommitted(self, mountPoint, commitID, pathsToClean,
+                         pathsToDrop):
+        return self._call(['scmMarkCommitted', mountPoint, commitID,
+                           repr(pathsToClean), repr(pathsToDrop)])
+
+    def glob(self, mountPoint, globs):
+        return self._call(['glob', mountPoint, repr(globs)])
+
+    def getFileInformation(self, mountPoint, files):
+        return self._call(['getFileInformation', mountPoint, repr(files)])
+
     def _call_binary(self, function, *function_args):
         arg_data = json.dumps([repr(arg) for arg in function_args])
         cmd = [
@@ -157,6 +168,46 @@ class FileInformation(object):
         self.size = size
         self.mtime = mtime
         self.mode = mode
+
+
+class FileInformationOrError(object):
+    """
+    Holds information about a file, or an error in retrieving that info.
+    The most likely error will be ENOENT, implying that the file doesn't exist.
+
+    Attributes:
+    - info
+    - error
+    """
+
+    __EMPTY__ = 0
+    INFO = 1
+    ERROR = 2
+
+    def __init__(self, info=None, error=None):
+        if info:
+            self.set_info(info)
+        else:
+            self.set_error(error)
+
+    def get_info(self):
+        assert self.field == 1
+        return self.value
+
+    def get_error(self):
+        assert self.field == 2
+        return self.value
+
+    def set_info(self, value):
+        self.field = 1
+        self.value = value
+
+    def set_error(self, value):
+        self.field = 2
+        self.value = value
+
+    def getType(self):
+        return self.field
 
 
 class CheckoutConflict(object):

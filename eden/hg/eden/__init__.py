@@ -25,6 +25,7 @@ from mercurial import (
 from mercurial import dirstate as dirstatemod
 from mercurial import merge as mergemod
 from mercurial.i18n import _
+from mercurial import match as matchmod
 import mercurial.demandimport
 
 '''
@@ -114,6 +115,7 @@ def extsetup(ui):
     extensions.wrapfunction(mergemod, 'update', merge_update)
     extensions.wrapfunction(hg, '_showstats', update_showstats)
     extensions.wrapfunction(orig, 'func', wrapdirstate)
+    extensions.wrapfunction(matchmod.match, '__init__', wrap_match_init)
     extensions.wrapcommand(commands.table, 'add', overrides.add)
     extensions.wrapcommand(commands.table, 'remove', overrides.remove)
     orig.paths = ()
@@ -338,6 +340,87 @@ def wrapdirstate(orig, repo):
     return edendirstate(repo, repo.ui, repo.root)
 
 
+class EdenMatchInfo(object):
+    ''' Holds high fidelity information about a matching operation '''
+    def __init__(self, root, cwd, exact, patterns, includes, excludes):
+        self._root = root
+        self._cwd = cwd
+        self._includes = includes + patterns
+        self._excludes = excludes
+        self._exact = exact
+
+    def make_glob_list(self):
+        ''' run through the list of includes and transform it into
+            a list of glob expressions. '''
+        globs = []
+        for kind, pat, raw in self._includes:
+            if kind == 'glob':
+                globs.append(pat)
+                continue
+            if kind in ('relpath', 'path'):
+                globs.append(pat + '/**/*')
+                continue
+            if kind == 'relglob':
+                globs.append('**/' + pat)
+                continue
+
+            raise NotImplementedError(
+                'match pattern %r is not supported by Eden' % (kind, pat, raw))
+        return globs
+
+
+def wrap_match_init(orig, match, root, cwd, patterns, include=None, exclude=None,
+                    default='glob', exact=False, auditor=None, ctx=None,
+                    listsubrepos=False, warn=None, badfn=None):
+    ''' Wrapper around matcher.match.__init__
+        The goal is to capture higher fidelity information about the matcher
+        being created than we would otherwise be able to extract from the
+        object once it has been created.
+
+        arguments:
+        root - the canonical root of the tree you're matching against
+        cwd - the current working directory, if relevant
+        patterns - patterns to find
+        include - patterns to include (unless they are excluded)
+        exclude - patterns to exclude (even if they are included)
+        default - if a pattern in patterns has no explicit type, assume this one
+        exact - patterns are actually filenames (include/exclude still apply)
+        warn - optional function used for printing warnings
+        badfn - optional bad() callback for this matcher instead of the default
+
+        a pattern is one of:
+        'glob:<glob>' - a glob relative to cwd
+        're:<regexp>' - a regular expression
+        'path:<path>' - a path relative to repository root, which is matched
+                        recursively
+        'rootfilesin:<path>' - a path relative to repository root, which is
+                        matched non-recursively (will not match subdirectories)
+        'relglob:<glob>' - an unrooted glob (*.c matches C files in all dirs)
+        'relpath:<path>' - a path relative to cwd
+        'relre:<regexp>' - a regexp that needn't match the start of a name
+        'set:<fileset>' - a fileset expression
+        'include:<path>' - a file of patterns to read and include
+        'subinclude:<path>' - a file of patterns to match against files under
+                              the same directory
+        '<something>' - a pattern of the specified default type
+    '''
+
+    res = orig(match, root, cwd, patterns, include, exclude, default,
+               exact, auditor, ctx, listsubrepos, warn, badfn)
+
+    info = EdenMatchInfo(root, cwd, exact,
+                         match._normalize(patterns or [],
+                                          default, root, cwd, auditor),
+                         match._normalize(include or [],
+                                          'glob', root, cwd, auditor),
+                         match._normalize(exclude or [],
+                                          'glob', root, cwd, auditor))
+
+    match._eden_match_info = info
+
+    return res
+
+
 class ClientStatus(object):
     def __init__(self):
         self.modified = []
@@ -421,6 +504,21 @@ class EdenThriftClient(object):
     def checkout(self, node, force):
         return self._client.checkOutRevision(self._root, node, force)
 
+    def glob(self, globs):
+        return self._client.glob(self._root, globs)
+
+    def getFileInformation(self, files):
+        return self._client.getFileInformation(self._root, files)
+
+
+class statobject(object):
+    ''' this is a stat-like object to represent information from eden.'''
+    __slots__ = ('st_mode', 'st_size', 'st_mtime')
+
+    def __init__(self, mode=None, size=None, mtime=None):
+        self.st_mode = mode
+        self.st_size = size
+        self.st_mtime = mtime
 
 class edendirstate(object):
     '''
@@ -679,9 +777,77 @@ class edendirstate(object):
         # Only used by the "debugignore" command
         raise NotImplementedError('edendirstate._ignorefileandline()')
 
+    def _eden_walk_helper(self, match, deleted, unknown, ignored):
+        ''' Extract the matching information we collected from the
+            match constructor and try to turn it into a list of
+            glob expressions.  If we don't have enough information
+            for this, make_glob_list() will raise an exception '''
+        if not util.safehasattr(match, '_eden_match_info'):
+            raise NotImplementedError(
+                'match object is not eden compatible' + \
+                '(_eden_match_info is missing)')
+        info = match._eden_match_info
+        globs = info.make_glob_list()
+
+        # Expand the glob into a set of candidate files
+        globbed_files = self.eden_client.glob(globs)
+
+        # Run the results through the matcher object; this processes
+        # any excludes that might be part of the matcher
+        matched_files = [f for f in globbed_files if match(f)]
+
+        if matched_files and (deleted or (not unknown) or (not ignored)):
+            # !unknown as parameter means that we need to exclude
+            # any files with an unknown status.
+            # !ignored -> exclude any ignored files.
+            # To get ignored files in the status list, we need to pass
+            # True when !ignored is passed in to us.
+            status = self.eden_client.getStatus(not ignored)
+            elide = set()
+            if not unknown:
+                elide.update(status.unknown)
+            if not ignored:
+                elide.update(status.ignored)
+            if deleted:
+                elide.update(status.removed)
+                elide.update(status.deleted)
+
+            matched_files = [f for f in matched_files if f not in elide]
+
+        return matched_files
+
     def walk(self, match, subrepos, unknown, ignored, full=True):
-        # TODO:
-        raise NotImplementedError('eden dirstate walk()')
+        '''
+        Walk recursively through the directory tree, finding all files
+        matched by match.
+
+        If full is False, maybe skip some known-clean files.
+
+        Return a dict mapping filename to stat-like object
+        '''
+
+        matched_files = self._eden_walk_helper(match,
+                                               deleted=True,
+                                               unknown=unknown,
+                                               ignored=ignored)
+
+        # Now we need to build a stat-like-object for each of these results
+        file_info = self.eden_client.getFileInformation(matched_files)
+
+        results = {}
+        for index, info in enumerate(file_info):
+            file_name = matched_files[index]
+            if info.getType() == eden_ttypes.FileInformationOrError.INFO:
+                finfo = info.get_info()
+                results[file_name] = statobject(mode=finfo.mode,
+                                                size=finfo.size,
+                                                mtime=finfo.mtime)
+            else:
+                # Indicates that we knew of the file, but that is it
+                # not present on disk; it has been removed.
+                results[file_name] = None
+
+        return results
 
     def status(self, match, subrepos, ignored, clean, unknown):
         # We should never have any files we are unsure about
@@ -699,7 +865,10 @@ class edendirstate(object):
         return (unsure, status)
 
     def matches(self, match):
-        raise NotImplementedError('edendirstate.matches()')
+        return self._eden_walk_helper(match,
+                                      deleted=False,
+                                      unknown=False,
+                                      ignored=False)
 
     def savebackup(self, tr, suffix='', prefix=''):
         '''
