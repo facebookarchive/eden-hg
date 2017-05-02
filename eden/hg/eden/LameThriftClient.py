@@ -53,16 +53,11 @@ class LameThriftClient(object):
     def scmGetStatus(self, mountPoint, listIgnored):
         return self._call('scmGetStatus', mountPoint, listIgnored)
 
-    def scmMarkCommitted(self, mountPoint, commitID, pathsToClean,
-                         pathsToDrop):
-        return self._call(['scmMarkCommitted', mountPoint, commitID,
-                           repr(pathsToClean), repr(pathsToDrop)])
-
     def glob(self, mountPoint, globs):
-        return self._call(['glob', mountPoint, repr(globs)])
+        return self._call('glob', mountPoint, globs)
 
     def getFileInformation(self, mountPoint, files):
-        return self._call(['getFileInformation', mountPoint, repr(files)])
+        return self._call('getFileInformation', mountPoint, files)
 
     def _call_binary(self, function, *function_args):
         arg_data = json.dumps([repr(arg) for arg in function_args])
