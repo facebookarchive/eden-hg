@@ -690,6 +690,7 @@ class edendirstate(object):
                              "calling dirstate.beginparentchange")
 
         self.eden_client.setHgParents(p1, p2)
+        self._parents = (p1, p2)
 
     def setbranch(self, branch):
         raise NotImplementedError('edendirstate.setbranch()')
