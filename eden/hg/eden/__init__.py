@@ -431,6 +431,18 @@ class ClientStatus(object):
         self.ignored = []
         self.clean = []
 
+    def __repr__(self):
+        return ('ClientStatus(modified={modified}; added={added}; '
+                'removed={removed}; deleted={deleted}; unknown={unknown}; '
+                'ignored={ignored}; clean={clean}').format(
+            modified=self.modified,
+            added=self.added,
+            removed=self.removed,
+            deleted=self.deleted,
+            unknown=self.unknown,
+            ignored=self.ignored,
+            clean=self.clean)
+
 
 class EdenThriftClient(object):
     def __init__(self, repo):
