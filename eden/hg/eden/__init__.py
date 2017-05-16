@@ -165,6 +165,9 @@ def mark_committed(orig, self, node):
 def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
                  mergeancestor=False, labels=None, matcher=None,
                  mergeforce=False, updatecheck=None):
+    '''Apparently node can be a 20-byte hash or an integer referencing a
+    revision number.
+    '''
     assert node is not None
 
     if not util.safehasattr(repo.dirstate, 'eden_client'):
@@ -231,8 +234,14 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
         else:
             stats = 0, 0, 0, 0
 
+        repo.dirstate.beginparentchange()
+        # TODO(mbolin): Set the second parent, if appropriate.
+        repo.setparents(node)
+
         # Clear the update state
         util.unlink(repo.vfs.join('updatestate'))
+
+        repo.dirstate.endparentchange()
 
     # Invoke the update hook
     repo.hook('update', parent1=deststr, parent2='', error=stats[3])
@@ -595,10 +604,22 @@ class edendirstate(object):
     def dirs(self):
         raise NotImplementedError('edendirstate.dirs()')
 
+    @property
     def _ignore(self):
+        '''Returns a function that takes a file path (relative to the repo root)
+        and returns a boolean indicating whether it is ignored.
+
+        Note that this function may be called in the middle of a merge/histedit.
+        '''
         # Even though this function starts with an underscore, it is directly
         # called from other parts of the mercurial code.
-        raise NotImplementedError('edendirstate._ignore()')
+
+        # For the moment, we are only testing with repos that do not introduce
+        # ignored files, so we categorically return False for now.
+        # TODO(mbolin): Provide a legit implementation of this method.
+        def never(filename):
+            return False
+        return never
 
     def _checklink(self):
         """
@@ -689,8 +710,19 @@ class edendirstate(object):
             raise ValueError("cannot set dirstate parent without "
                              "calling dirstate.beginparentchange")
 
-        self.eden_client.setHgParents(p1, p2)
-        self._parents = (p1, p2)
+        # Normalize p1 and p2 to hashes in case either is passed in as a
+        # revision number.
+        if type(p1) is int:
+            p1_node = self._repo.lookup(p1)
+        else:
+            p1_node = p1
+        if type(p2) is int:
+            p2_node = self._repo.lookup(p2)
+        else:
+            p2_node = p2
+
+        self.eden_client.setHgParents(p1_node, p2_node)
+        self._parents = (p1_node, p2_node)
 
     def setbranch(self, branch):
         raise NotImplementedError('edendirstate.setbranch()')
@@ -739,19 +771,23 @@ class edendirstate(object):
 
     def otherparent(self, f):
         """Mark as coming from the other parent, always dirty."""
-        raise NotImplementedError('edendirstate.otherparent()')
+        if self.p2() == node.nullid:
+            raise error.Abort(_('setting %r to other parent '
+                                'only allowed in merges') % f)
 
     def add(self, f):
         """Mark a file added."""
-        raise NotImplementedError(
-            'Unexpected call to edendirstate.add(). ' +
-            'All calls to add() are expected to go through the CLI.')
+        # TODO(mbolin): Eliminate add() in overrides.py and let `hg add` flow
+        # into this command in the natural way. This should now be possible
+        # due to @wez's matcher work.
+        self.thrift_scm_add([f])
 
     def remove(self, f):
         """Mark a file removed."""
-        raise NotImplementedError(
-            'Unexpected call to edendirstate.remove(). ' +
-            'All calls to remove() are expected to go through the CLI.')
+        # TODO(mbolin): Eliminate remove() in overrides.py and let `hg rm` flow
+        # into this command in the natural way. This should now be possible
+        # due to @wez's matcher work.
+        self.thrift_scm_remove([f], force=False)
 
     def merge(self, f):
         """Mark a file merged."""
