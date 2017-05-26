@@ -45,6 +45,7 @@ with mercurial.demandimport.deactivated():
 
         import eden.thrift as eden_thrift_module
         import facebook.eden.ttypes as eden_ttypes
+        import facebook.hgdirstate.ttypes as hg_ttypes
         thrift_client_type = 'native'
     except Exception:
         # If we fail to import eden.thrift, fall back to using the
@@ -58,12 +59,21 @@ with mercurial.demandimport.deactivated():
         # it is in place to ease development.
         from . import LameThriftClient as eden_thrift_module
         eden_ttypes = eden_thrift_module
+        from . import LameHgTypes as hg_ttypes
         thrift_client_type = 'lame'
 
 create_thrift_client = eden_thrift_module.create_thrift_client
 StatusCode = eden_ttypes.StatusCode
 ConflictType = eden_ttypes.ConflictType
 FileInformationOrError = eden_ttypes.FileInformationOrError
+HgNonnormalFile = eden_ttypes.HgNonnormalFile
+
+DirstateCopymap = hg_ttypes.DirstateCopymap
+DirstateMergeState = hg_ttypes.DirstateMergeState
+DirstateNonnormalFileStatus = hg_ttypes.DirstateNonnormalFileStatus
+DirstateNonnormalFile = hg_ttypes.DirstateNonnormalFile
+DirstateNonnormalFiles = hg_ttypes.DirstateNonnormalFiles
+DirstateTuple = hg_ttypes.DirstateTuple
 
 
 class ClientStatus(object):
@@ -140,24 +150,6 @@ class EdenThriftClient(object):
                 raise Exception('Unexpected status code: %s' % code)
         return status
 
-    def add(self, paths):
-        '''paths must be a normalized paths relative to the repo root.
-
-        Note that each path in paths may refer to a file or a directory.
-
-        Returns a possibly empty list of errors to present to the user.
-        '''
-        return self._client.scmAdd(self._root, paths)
-
-    def remove(self, paths, force):
-        '''paths must be a normalized paths relative to the repo root.
-
-        Note that each path in paths may refer to a file or a directory.
-
-        Returns a possibly empty list of errors to present to the user.
-        '''
-        return self._client.scmRemove(self._root, paths, force)
-
     def checkout(self, node, force):
         return self._client.checkOutRevision(self._root, node, force)
 
@@ -166,3 +158,27 @@ class EdenThriftClient(object):
 
     def getFileInformation(self, files):
         return self._client.getFileInformation(self._root, files)
+
+    def hgGetDirstateTuple(self, relativePath):
+        return self._client.hgGetDirstateTuple(self._root, relativePath)
+
+    def hgSetDirstateTuple(self, relativePath, dirstateTuple):
+        return self._client.hgSetDirstateTuple(self._root, relativePath,
+                                               dirstateTuple)
+
+    def hgGetNonnormalFiles(self):
+        # type() -> List[HgNonnormalFile]
+        return self._client.hgGetNonnormalFiles(self._root)
+
+    def hgCopyMapPut(self, relativePathDest, relativePathSource):
+        # type(str, str) -> None
+        return self._client.hgCopyMapGet(self._root, relativePathDest,
+                                         relativePathSource)
+
+    def hgCopyMapGet(self, relativePathDest):
+        # type(str) -> str
+        return self._client.hgCopyMapGet(self._root, relativePathDest)
+
+    def hgCopyMapGetAll(self):
+        # type(str) -> Dict[str, str]
+        return self._client.hgCopyMapGetAll(self._root)

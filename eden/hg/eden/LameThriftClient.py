@@ -21,6 +21,10 @@ import os
 import subprocess
 
 
+from . import LameHgTypes as hg_ttypes
+DirstateTuple = hg_ttypes.DirstateTuple
+
+
 class LameThriftClient(object):
     def __init__(self, pyremote, eden_dir=None, mounted_path=None):
         self._pyremote = pyremote
@@ -44,12 +48,6 @@ class LameThriftClient(object):
     def resetParentCommits(self, mountPoint, parents):
         return self._call('resetParentCommits', mountPoint, parents)
 
-    def scmAdd(self, mountPoint, paths):
-        return self._call('scmAdd', mountPoint, paths)
-
-    def scmRemove(self, mountPoint, paths, force):
-        return self._call('scmRemove', mountPoint, paths, force)
-
     def scmGetStatus(self, mountPoint, listIgnored):
         return self._call('scmGetStatus', mountPoint, listIgnored)
 
@@ -58,6 +56,26 @@ class LameThriftClient(object):
 
     def getFileInformation(self, mountPoint, files):
         return self._call('getFileInformation', mountPoint, files)
+
+    def hgGetDirstateTuple(self, mountPoint, relativePath):
+        return self._call('hgGetDirstateTuple', mountPoint, relativePath)
+
+    def hgSetDirstateTuple(self, mountPoint, relativePath, dirstateTuple):
+        return self._call('hgSetDirstateTuple', mountPoint, relativePath,
+                          dirstateTuple)
+
+    def hgGetNonnormalFiles(self, mountPoint):
+        return self._call('hgGetNonnormalFiles', mountPoint)
+
+    def hgCopyMapPut(self, mountPoint, relativePathDest, relativePathSource):
+        return self._call('hgCopyMapPut', mountPoint, relativePathDest,
+                          relativePathSource)
+
+    def hgCopyMapGet(self, mountPoint, relativePathDest):
+        return self._call('hgCopyMapGet', mountPoint, relativePathDest)
+
+    def hgCopyMapGetAll(self, mountPoint):
+        return self._call('hgCopyMapGetAll', mountPoint)
 
     def _call_binary(self, function, *function_args):
         arg_data = json.dumps([repr(arg) for arg in function_args])
@@ -264,7 +282,13 @@ StatusCode = _define_enum(
     'IGNORED')
 
 
-class ScmAddRemoveError(object):
-    def __init__(self, path, errorMessage):
-        self.path = path
-        self.errorMessage = errorMessage
+class HgNonnormalFile(object):
+    __slots__ = ('relativePath', 'tuple')
+
+    def __init__(self, relativePath, tuple):
+        self.relativePath = relativePath
+        self.tuple = tuple
+
+    def __repr__(self):
+        return ('HgNonnormalFile(relativePath=%r, tuple=%r)' %
+                (self.relativePath, self.tuple))

@@ -16,33 +16,14 @@ from __future__ import division
 from __future__ import print_function
 
 from mercurial import (
-    commands, context, error, extensions, hg, localrepo, util
+    context, error, extensions, hg, localrepo, util
 )
 from mercurial import merge as mergemod
 from mercurial.i18n import _
 from mercurial import match as matchmod
 from . import EdenThriftClient as thrift
 ConflictType = thrift.ConflictType
-
-'''
-In general, there are two appraoches we could take to implement subcommands like
-`hg add` in Eden:
-1. Make sure that edendirstate implements the full dirstate API such that we
-   use the default implementation of `hg add` and it has no idea that it is
-   talking to edendirstate.
-2. Reimplement `hg add` completely.
-
-In general, #1 is a better approach because it is helpful for other built-in
-commands in Hg that also talk to the dirstate. However, it appears that `hg add`
-calls `dirstate.walk()`, which is a real pain to implement, and honestly,
-something we probably don't want to implement. We can make more progress by
-redefining `hg add` in Eden so it does a simple Thrift call to update the
-overlay.
-'''
-from . import (
-    overrides,
-)
-
+import os
 
 _requirement = 'eden'
 _repoclass = localrepo.localrepository
@@ -70,8 +51,6 @@ def extsetup(ui):
     extensions.wrapfunction(hg, '_showstats', update_showstats)
     extensions.wrapfunction(orig, 'func', wrapdirstate)
     extensions.wrapfunction(matchmod.match, '__init__', wrap_match_init)
-    extensions.wrapcommand(commands.table, 'add', overrides.add)
-    extensions.wrapcommand(commands.table, 'remove', overrides.remove)
     orig.paths = ()
 
     if thrift.thrift_client_type != 'native':
@@ -294,14 +273,9 @@ def wrapdirstate(orig, repo):
     if _requirement not in repo.requirements:
         return orig(repo)
 
-    # For now we intentionally do not derive from the original dirstate class.
-    #
-    # We want to make sure that we never accidentally fall back to the base
-    # dirstate functionality; anything we do should be tailored for eden.
-
     # have the edendirstate class implementation more complete.
-    from . import edendirstate as dirstate_reimplementation
-    return dirstate_reimplementation.edendirstate(repo, repo.ui, repo.root)
+    from . import eden_dirstate as dirstate_reimplementation
+    return dirstate_reimplementation.eden_dirstate(repo, repo.ui, repo.root)
 
 
 class EdenMatchInfo(object):
@@ -322,7 +296,11 @@ class EdenMatchInfo(object):
                 globs.append(pat)
                 continue
             if kind in ('relpath', 'path'):
-                globs.append(pat + '/**/*')
+                base_dir = self._root if kind == 'path' else self._cwd
+                if os.path.isdir(os.path.join(base_dir, pat)):
+                    globs.append(pat + '/**/*')
+                else:
+                    globs.append(pat)
                 continue
             if kind == 'relglob':
                 globs.append('**/' + pat)
@@ -331,6 +309,9 @@ class EdenMatchInfo(object):
             raise NotImplementedError(
                 'match pattern %r is not supported by Eden' % (kind, pat, raw))
         return globs
+
+    def __str__(self):
+        return str(self.make_glob_list())
 
 
 def wrap_match_init(orig, match, root, cwd, patterns, include=None, exclude=None,
