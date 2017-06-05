@@ -50,7 +50,7 @@ def extsetup(ui):
     extensions.wrapfunction(mergemod, 'update', merge_update)
     extensions.wrapfunction(hg, '_showstats', update_showstats)
     extensions.wrapfunction(orig, 'func', wrapdirstate)
-    extensions.wrapfunction(matchmod.match, '__init__', wrap_match_init)
+    extensions.wrapfunction(matchmod, 'match', wrap_match)
     orig.paths = ()
 
     if thrift.thrift_client_type != 'native':
@@ -314,9 +314,9 @@ class EdenMatchInfo(object):
         return str(self.make_glob_list())
 
 
-def wrap_match_init(orig, match, root, cwd, patterns, include=None, exclude=None,
+def wrap_match(orig, root, cwd, patterns, include=None, exclude=None,
                     default='glob', exact=False, auditor=None, ctx=None,
-                    listsubrepos=False, warn=None, badfn=None):
+                    listsubrepos=False, warn=None, badfn=None, icasefs=False):
     ''' Wrapper around matcher.match.__init__
         The goal is to capture higher fidelity information about the matcher
         being created than we would otherwise be able to extract from the
@@ -350,17 +350,17 @@ def wrap_match_init(orig, match, root, cwd, patterns, include=None, exclude=None
         '<something>' - a pattern of the specified default type
     '''
 
-    res = orig(match, root, cwd, patterns, include, exclude, default,
-               exact, auditor, ctx, listsubrepos, warn, badfn)
+    res = orig(root, cwd, patterns, include, exclude, default,
+               exact, auditor, ctx, listsubrepos, warn, badfn, icasefs)
 
     info = EdenMatchInfo(root, cwd, exact,
-                         match._normalize(patterns or [],
-                                          default, root, cwd, auditor),
-                         match._normalize(include or [],
-                                          'glob', root, cwd, auditor),
-                         match._normalize(exclude or [],
-                                          'glob', root, cwd, auditor))
+                         matchmod._donormalize(patterns or [],
+                                               default, root, cwd, auditor, False),
+                         matchmod._donormalize(include or [],
+                                               'glob', root, cwd, auditor, False),
+                         matchmod._donormalize(exclude or [],
+                                               'glob', root, cwd, auditor, False))
 
-    match._eden_match_info = info
+    res._eden_match_info = info
 
     return res

@@ -9,12 +9,14 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from mercurial import dirstate, node, parsers, scmutil, util
+from mercurial import dirstate, node, policy, scmutil, util
 from . import EdenThriftClient as thrift
 from . import eden_dirstate_map as eden_dirstate_map
 import collections
 import stat
 import os
+
+parsers = policy.importmod('parsers')
 
 dirstatetuple = parsers.dirstatetuple
 
