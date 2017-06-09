@@ -99,7 +99,7 @@ class DatapackStoreKeyIterator : public KeyIterator {
       _store(store),
       _missing(missing) {}
 
-    Key *next();
+    Key* next() override;
 };
 
 /* Manages access to a directory of datapack files. */
