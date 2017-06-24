@@ -19,7 +19,7 @@ import os
 import sys
 
 from mercurial import node
-import mercurial.demandimport
+from mercurial import demandimport
 
 # Disable demandimport while importing thrift files.
 #
@@ -28,7 +28,7 @@ import mercurial.demandimport
 # breaks this behavior by making it appear like the modules were successfully
 # loaded, and only throwing ImportError later when you actually try to use
 # them.
-with mercurial.demandimport.deactivated():
+with demandimport.deactivated():
     try:
         # The native thrift code requires a new enough version of python
         # where struct.pack() accepts format strings as unicode.
