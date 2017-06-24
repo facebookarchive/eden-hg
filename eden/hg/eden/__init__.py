@@ -83,9 +83,8 @@ def mark_committed(orig, self, node):
         # transaction rather than execute it directly here.
         def callback(tr):
             dirstate = self._repo.dirstate
-            dirstate.beginparentchange()
-            dirstate.setparents(node)
-            dirstate.endparentchange()
+            with dirstate.parentchange():
+                dirstate.setparents(node)
 
         self._repo.currenttransaction().addpostclose('commit', callback)
     else:
@@ -167,14 +166,12 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
         else:
             stats = 0, 0, 0, 0
 
-        repo.dirstate.beginparentchange()
-        # TODO(mbolin): Set the second parent, if appropriate.
-        repo.setparents(node)
+        with repo.dirstate.parentchange():
+            # TODO(mbolin): Set the second parent, if appropriate.
+            repo.setparents(node)
 
-        # Clear the update state
-        util.unlink(repo.vfs.join('updatestate'))
-
-        repo.dirstate.endparentchange()
+            # Clear the update state
+            util.unlink(repo.vfs.join('updatestate'))
 
     # Invoke the update hook
     repo.hook('update', parent1=deststr, parent2='', error=stats[3])
