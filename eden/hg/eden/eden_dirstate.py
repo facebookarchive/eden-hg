@@ -36,6 +36,10 @@ class dummy_copymap(collections.MutableMapping):
         # type(dummy_copymap, EdenThriftClient) -> None
         self._thrift_client = thrift_client
 
+    def _get_mapping_thrift(self):
+        # type(dummy_copymap) -> Dict[str, str]
+        return self._thrift_client.hgCopyMapGetAll()
+
     def __getitem__(self, dest_filename):
         # type(str) -> str
         try:
@@ -52,10 +56,22 @@ class dummy_copymap(collections.MutableMapping):
         self._thrift_client.hgCopyMapPut(dest_filename, '')
 
     def __iter__(self):
-        return self._thrift_client.hgCopyMapGetAll().__iter__()
+        return iter(self._get_mapping_thrift())
 
     def __len__(self):
         raise Exception('Should not call __len__ on dummy_copymap!')
+
+    def keys(self):
+        # collections.MutableMapping implements keys(), but does so poorly--
+        # it ends up calling __iter__() and then __len__(), and we want to
+        # avoid making two separate thrift calls.
+        return self._get_mapping_thrift().keys()
+
+    def copy(self):
+        # We return a new dict object, and not dummy_copymap() object.
+        # Any mutations made to the returned copy should not affect the actual
+        # dirstate, and should not be sent back to eden via thrift.
+        return self._get_mapping_thrift().copy()
 
 
 class eden_dirstate(dirstate.dirstate):
