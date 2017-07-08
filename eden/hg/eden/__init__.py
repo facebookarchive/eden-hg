@@ -16,7 +16,7 @@ from __future__ import division
 from __future__ import print_function
 
 from mercurial import (
-    context, error, extensions, hg, localrepo, util
+    error, extensions, hg, localrepo, util
 )
 from mercurial import merge as mergemod
 from mercurial.i18n import _
@@ -45,8 +45,6 @@ def extsetup(ui):
     # dirstate.invalidate() by default, so we must wrap it.
     extensions.wrapfunction(localrepo.localrepository, 'invalidatedirstate',
                             invalidatedirstate)
-    extensions.wrapfunction(context.committablectx, 'markcommitted',
-                            mark_committed)
     extensions.wrapfunction(mergemod, 'update', merge_update)
     extensions.wrapfunction(hg, '_showstats', update_showstats)
     extensions.wrapfunction(orig, 'func', wrapdirstate)
@@ -67,28 +65,6 @@ def invalidatedirstate(orig, self):
         # _filecache property of dirstate, which is not a field we provide in
         # edendirstate.
         orig(self)
-
-
-def mark_committed(orig, self, node):
-    '''Perform post-commit cleanup necessary after committing this ctx (self).
-
-    Specifically, self is a commitablectx from context.py.
-    '''
-    if _requirement in self._repo.requirements:
-        # When markcommitted() is called from localrepo.py, it is in the middle
-        # of a transaction. The commit data for the specified `node` will not be
-        # written to .hg until the transaction completes. Because our
-        # server-side logic relies on being able to read the commit data out of
-        # .hg, we schedule it as an addpostclose callback on the current
-        # transaction rather than execute it directly here.
-        def callback(tr):
-            dirstate = self._repo.dirstate
-            with dirstate.parentchange():
-                dirstate.setparents(node)
-
-        self._repo.currenttransaction().addpostclose('commit', callback)
-    else:
-        orig(self, node)
 
 
 # This function replaces the update() function in mercurial's mercurial.merge
@@ -151,6 +127,12 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
 
         # Ask eden to perform the checkout
         if force or p1ctx != destctx:
+            # Write out pending transaction data if there is a transaction in
+            # progress, so eden will be able to access the destination node.
+            tr = repo.currenttransaction()
+            if tr is not None:
+                tr.writepending()
+
             conflicts = repo.dirstate.eden_client.checkout(
                 destctx.node(), force=force)
         else:

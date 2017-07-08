@@ -194,6 +194,12 @@ class eden_dirstate(dirstate.dirstate):
         else:
             p2_node = p2
 
+        # If a transaction is currently in progress, make sure it has flushed
+        # pending commit data to disk so that eden will be able to access it.
+        txn = self._repo.currenttransaction()
+        if txn is not None:
+            txn.writepending()
+
         self.eden_client.setHgParents(p1_node, p2_node)
         self._parents = (p1_node, p2_node)
 
