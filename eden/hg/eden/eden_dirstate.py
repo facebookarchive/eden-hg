@@ -10,6 +10,17 @@ from __future__ import division
 from __future__ import print_function
 
 from mercurial import dirstate, node, policy, scmutil, util
+try:
+    # Check to see if this mercurial version has the sparse module.
+    from mercurial import sparse as sparsemod
+    # Unfortunately due to the demandimport module, the import above will
+    # succeed even on older versions of mercurial that do not actually contain
+    # sparse.  Access a member of the module to force it to be loaded.
+    sparsemod.__name__
+except ImportError:
+    # Older versions of mercurial do not have sparse
+    sparsemod = None
+
 from . import EdenThriftClient as thrift
 from . import eden_dirstate_map as eden_dirstate_map
 import collections
@@ -86,7 +97,17 @@ class eden_dirstate(dirstate.dirstate):
         opener = None
         # We should override any logic in dirstate that uses self._validate.
         validate = None
-        super(eden_dirstate, self).__init__(opener, ui, root, validate)
+
+        # Newer versions of mercurial require a sparsematchfn argument to the
+        # dirstate.
+        if sparsemod is not None:
+            def sparsematchfn():
+                return sparsemod.matcher(repo)
+            super(eden_dirstate, self).__init__(opener, ui, root, validate,
+                                                sparsematchfn)
+        else:
+            super(eden_dirstate, self).__init__(opener, ui, root, validate)
+
         self._repo = repo
 
         # self._parents is a cache of the current parent node IDs.
