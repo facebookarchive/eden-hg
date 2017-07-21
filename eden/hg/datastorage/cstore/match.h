@@ -22,13 +22,13 @@ class AlwaysMatcher : public Matcher {
   public:
     AlwaysMatcher() {}
     ~AlwaysMatcher() override {}
-    bool matches(const std::string& path) override {
+    bool matches(const std::string& /*path*/) override {
       return true;
     }
-    bool matches(const char* path, const size_t pathlen) override {
+    bool matches(const char* /*path*/, const size_t /*pathlen*/) override {
       return true;
     }
-    bool visitdir(const std::string& path) override {
+    bool visitdir(const std::string& /*path*/) override {
       return true;
     }
 };
