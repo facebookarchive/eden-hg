@@ -93,11 +93,10 @@ class eden_dirstate(dirstate.dirstate):
         )
         self._eden_copymap_impl = dummy_copymap(self.eden_client)
 
-        # We should override any logic in dirstate that uses self._opener.
-        opener = None
         # We should override any logic in dirstate that uses self._validate.
         validate = None
 
+        opener = repo.vfs
         # Newer versions of mercurial require a sparsematchfn argument to the
         # dirstate.
         if sparsemod is not None:
@@ -141,13 +140,6 @@ class eden_dirstate(dirstate.dirstate):
 
     def dirs(self):  # override
         raise NotImplementedError('eden_dirstate.dirs()')
-
-    def branch(self):  # override
-        # TODO(mbolin): Is this OK?
-        return 'default'
-
-    def setbranch(self, branch):  # override
-        raise NotImplementedError('eden_dirstate.setbranch()')
 
     @property
     def _nonnormalset(self):  # override
