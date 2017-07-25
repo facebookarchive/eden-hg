@@ -236,8 +236,6 @@ class eden_dirstate(dirstate.dirstate):
         # TODO(mbolin): Should we explicitly clear out _eden_map_impl or
         # _eden_copymap_impl, or should we assume this has already been done on
         # the server?
-        self._nonnormalset = set()
-        self._otherparentset = set()
         self._pl = [node.nullid, node.nullid]
         self._lastnormaltime = 0
         self._updatedfiles.clear()
@@ -402,10 +400,6 @@ class eden_dirstate(dirstate.dirstate):
         self._dirty = True
         self._updatedfiles.add(f)
         self._map[f] = dirstatetuple(state, mode, size, mtime)
-        if state != 'n' or mtime == -1:
-            self._nonnormalset.add(f)
-        if size == -2:
-            self._otherparentset.add(f)
 
     def write(self, tr):  # override
         '''This appears to be called from localrepo.'''
