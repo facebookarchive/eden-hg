@@ -436,5 +436,5 @@ class eden_dirstate(dirstate.dirstate):
         raise NotImplementedError('eden_dirstate.clearbackup()')
 
     def _opendirstatefile(self):  # override
-        # TODO: used by the journal extension
-        raise NotImplementedError('eden_dirstate._opendirstatefile()')
+        raise NotImplementedError(
+            'No one should try to invoke _opendirstatefile() in eden_dirstate.')
