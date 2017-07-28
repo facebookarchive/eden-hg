@@ -231,7 +231,6 @@ class eden_dirstate(dirstate.dirstate):
         self._pl = [node.nullid, node.nullid]
         self._lastnormaltime = 0
         self._updatedfiles.clear()
-        self._dirty = True
 
     def walk(self, match, subrepos, unknown, ignored, full=True):  # override
         '''
@@ -389,7 +388,6 @@ class eden_dirstate(dirstate.dirstate):
         if state == 'a' or oldstate == 'r':
             scmutil.checkfilename(f)
 
-        self._dirty = True
         self._updatedfiles.add(f)
         self._map[f] = dirstatetuple(state, mode, size, mtime)
 
@@ -397,43 +395,47 @@ class eden_dirstate(dirstate.dirstate):
         '''This appears to be called from localrepo.'''
         pass
 
-    def savebackup(self, tr, suffix='', prefix=''):  # override
+    def savebackup(self, tr, backupname):  # override
+        '''Save current dirstate into backup file'''
+        backup_file = self._opener(backupname, 'w', atomictemp=True)
+        # TODO(mbolin): Notify _plchangecallbacks in setparents() even though
+        # dirstate.py does it in this method.
+        parents = self.parents()
+        backup_file.write(parents[0] + parents[1])
+        backup_file.close()
+
+        if tr:
+            # ensure that pending file written above is unlinked at
+            # failure, even if tr.writepending isn't invoked until the
+            # end of this transaction
+            tr.registertmp(backupname, location='plain')
+
+    def _writedirstate(self, st):  # override
+        raise NotImplementedError(
+            'No one should try to invoke _writedirstate() in eden_dirstate.')
+
+    def restorebackup(self, tr, backupname):  # override
         '''
-        Saves the current dirstate, using prefix/suffix to namespace the storage
-        where the current dirstate is persisted.
-        One of prefix or suffix must be set.
-
-        The complement to this method is self.restorebackup(tr, suffix, prefix).
-
         Args:
             tr (transaction?): such as `repo.currenttransaction()` or None.
-            suffix (str): If persisted to a file, suffix of file to use.
-            prefix (str): If persisted to a file, prefix of file to use.
+            backupname (str): Filename to pass to opener for reading data.
         '''
-        assert len(suffix) > 0 or len(prefix) > 0
-        # TODO(mbolin): Create a snapshot for the current dirstate and persist
-        # it to a safe place.
-        pass
+        # this "invalidate()" prevents "wlock.release()" from writing
+        # changes of dirstate out after restoring from backup file
+        self.invalidate()
 
-    def restorebackup(self, tr, suffix='', prefix=''):  # override
-        '''
-        Restores the saved dirstate, using prefix/suffix to namespace the
-        storage where the dirstate was persisted.
-        One of prefix or suffix must be set.
+        backup_data = self._opener.read(backupname).strip()
+        p1 = node.nullid
+        p2 = node.nullid
+        if backup_data is not None:
+            assert len(backup_data) == 40
+            p1 = backup_data[0:20]
+            p2 = backup_data[20:40]
 
-        The complement to this method is self.savebackup(tr, suffix, prefix).
+        with self.parentchange():
+            self.setparents(p1, p2)
 
-        Args:
-            tr (transaction?): such as `repo.currenttransaction()` or None.
-            suffix (str): If persisted to a file, suffix of file to use.
-            prefix (str): If persisted to a file, prefix of file to use.
-        '''
-        assert len(suffix) > 0 or len(prefix) > 0
-        # TODO(mbolin): Restore the snapshot written by savebackup().
-        pass
-
-    def clearbackup(self, tr, suffix='', prefix=''):  # override
-        raise NotImplementedError('eden_dirstate.clearbackup()')
+        self._opener.tryunlink(backupname)
 
     def _opendirstatefile(self):  # override
         raise NotImplementedError(
