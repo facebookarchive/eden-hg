@@ -93,10 +93,12 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
         useeden = True
 
     if not useeden:
-        repo.ui.debug("falling back to non-eden update code path")
+        repo.ui.debug('falling back to non-eden update code path\n')
         return orig(repo, node, branchmerge, force, ancestor=ancestor,
                     mergeancestor=mergeancestor, labels=labels, matcher=matcher,
                     mergeforce=mergeforce)
+    else:
+        repo.ui.debug('using eden update code path\n')
 
     with repo.wlock():
         wctx = repo[None]
