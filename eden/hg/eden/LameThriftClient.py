@@ -29,9 +29,12 @@ class LameThriftClient(object):
     def __init__(self, pyremote, eden_dir=None, mounted_path=None):
         self._pyremote = pyremote
         if mounted_path:
-            self._eden_socket = os.path.join(mounted_path, '.eden', 'socket')
+            eden_socket = os.path.join(mounted_path, '.eden', 'socket')
         else:
-            self._eden_socket = os.path.join(eden_dir, 'socket')
+            eden_socket = os.path.join(eden_dir, 'socket')
+        # Note that eden_socket is often a symlink. We resolve this up front to
+        # avoid any potential overhead when reading this path later.
+        self._eden_socket = os.path.realpath(eden_socket)
 
     def open(self):
         pass
@@ -88,6 +91,7 @@ class LameThriftClient(object):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,
+            close_fds=True,
         )
         output, error = proc.communicate(arg_data)
         if proc.returncode != 0:
