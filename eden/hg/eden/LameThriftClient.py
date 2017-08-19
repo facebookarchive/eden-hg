@@ -67,6 +67,9 @@ class LameThriftClient(object):
         return self._call('hgSetDirstateTuple', mountPoint, relativePath,
                           dirstateTuple)
 
+    def hgDeleteDirstateTuple(self, mountPoint, relativePath):
+        return self._call('hgDeleteDirstateTuple', mountPoint, relativePath)
+
     def hgGetNonnormalFiles(self, mountPoint):
         return self._call('hgGetNonnormalFiles', mountPoint)
 

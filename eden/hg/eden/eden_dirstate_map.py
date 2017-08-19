@@ -66,14 +66,7 @@ class eden_dirstate_map(collections.MutableMapping):
         self._thrift_client.hgSetDirstateTuple(filename, thrift_dirstate_tuple)
 
     def __delitem__(self, filename):
-        # TODO(mbolin): Setting a file to Normal/NotApplicable happens to clear
-        # it from Dirstate.cpp right now, but this seems accidental. Should
-        # probably create a proper API.
-        thrift_dirstate_tuple = thrift.DirstateTuple(
-            thrift.DirstateNonnormalFileStatus.Normal,
-            0o644,
-            thrift.DirstateMergeState.NotApplicable)
-        self._thrift_client.hgSetDirstateTuple(filename, thrift_dirstate_tuple)
+        self._thrift_client.hgDeleteDirstateTuple(filename)
 
     def __iter__(self):
         raise Exception('Should not call __iter__ on eden_dirstate_map!')

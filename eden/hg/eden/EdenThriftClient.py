@@ -166,6 +166,9 @@ class EdenThriftClient(object):
         return self._client.hgSetDirstateTuple(self._root, relativePath,
                                                dirstateTuple)
 
+    def hgDeleteDirstateTuple(self, relativePath):
+        return self._client.hgDeleteDirstateTuple(self._root, relativePath)
+
     def hgGetNonnormalFiles(self):
         # type() -> List[HgNonnormalFile]
         return self._client.hgGetNonnormalFiles(self._root)
