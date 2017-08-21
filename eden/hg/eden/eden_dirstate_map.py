@@ -27,6 +27,19 @@ class eden_dirstate_map(collections.MutableMapping):
 
     def __getitem__(self, filename):
         # type(str) -> parsers.dirstatetuple
+        # TODO: Support Hg submodules.
+        # Mercurial has a bit of logic that depends on whether .hgsub or
+        # .hgsubstate is in the dirstate. Currently, Eden does not attempt to
+        # support submodules (and none of Hg's codepaths that use submodules
+        # have been tested with Eden), so the server throws an exception when
+        # either .hgsub or .hgsubstate is passed to hgGetDirstateTuple().
+        #
+        # Because we know the Thrift call will fail, we throw the corresponding
+        # KeyError in this case to avoid the overhead of the Thrift call as a
+        # performance optimization.
+        if filename == '.hgsub' or filename == '.hgsubstate':
+            raise KeyError(filename)
+
         try:
             thrift_dirstate_tuple = self._thrift_client.hgGetDirstateTuple(
                 filename
