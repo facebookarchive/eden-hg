@@ -159,6 +159,9 @@ class EdenThriftClient(object):
     def getFileInformation(self, files):
         return self._client.getFileInformation(self._root, files)
 
+    def hgClearDirstate(self):
+        return self._client.hgClearDirstate(self._root)
+
     def hgGetDirstateTuple(self, relativePath):
         return self._client.hgGetDirstateTuple(self._root, relativePath)
 

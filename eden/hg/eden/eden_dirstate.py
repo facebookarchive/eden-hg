@@ -225,9 +225,7 @@ class eden_dirstate(dirstate.dirstate):
     def clear(self):  # override
         '''Intended to match superclass implementation except for changes to
         map_ and copymap_.'''
-        # TODO(mbolin): Should we explicitly clear out _eden_map_impl or
-        # _eden_copymap_impl, or should we assume this has already been done on
-        # the server?
+        self.eden_client.hgClearDirstate()
         self._pl = [node.nullid, node.nullid]
         self._lastnormaltime = 0
         self._updatedfiles.clear()
