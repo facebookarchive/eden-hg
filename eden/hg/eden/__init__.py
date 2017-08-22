@@ -49,6 +49,7 @@ def extsetup(ui):
     extensions.wrapfunction(hg, '_showstats', update_showstats)
     extensions.wrapfunction(orig, 'func', wrapdirstate)
     extensions.wrapfunction(matchmod, 'match', wrap_match)
+    extensions.wrapfunction(matchmod, 'exact', wrap_match_exact)
     orig.paths = ()
 
     if thrift.thrift_client_type != 'native':
@@ -278,7 +279,8 @@ class EdenMatchInfo(object):
                 continue
             if kind in ('relpath', 'path'):
                 base_dir = self._root if kind == 'path' else self._cwd
-                if os.path.isdir(os.path.join(base_dir, pat)):
+                # An "exact" matcher always matches files only.
+                if not self._exact and os.path.isdir(os.path.join(base_dir, pat)):
                     globs.append(pat + '/**/*')
                 else:
                     globs.append(pat)
@@ -344,4 +346,21 @@ def wrap_match(orig, root, cwd, patterns, include=None, exclude=None,
 
     res._eden_match_info = info
 
+    return res
+
+
+def wrap_match_exact(orig, root, cwd, files, badfn=None):
+    res = orig(root, cwd, files, badfn)
+
+    # Note that files could be a dict. In this case, the keys are the names of
+    # the files to match.
+    if not isinstance(files, list):
+        files = list(files)
+
+    # Normalize the patterns for the EdenMatchInfo and create it.
+    patterns = matchmod._donormalize(files, 'path', root, cwd, auditor=None,
+                                     warn=False)
+    res._eden_match_info = EdenMatchInfo(root, cwd, exact=True,
+                                         patterns=patterns, includes=[],
+                                         excludes=[])
     return res
