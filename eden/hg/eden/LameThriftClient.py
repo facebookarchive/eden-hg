@@ -78,7 +78,8 @@ class LameThriftClient(object):
                           relativePathSource)
 
     def hgCopyMapGet(self, mountPoint, relativePathDest):
-        return self._call('hgCopyMapGet', mountPoint, relativePathDest)
+        return self._call_and_return_raw_output('hgCopyMapGet', mountPoint,
+                                                relativePathDest)
 
     def hgCopyMapGetAll(self, mountPoint):
         return self._call('hgCopyMapGetAll', mountPoint)
@@ -102,11 +103,24 @@ class LameThriftClient(object):
                             (error,))
         return output
 
-    def _call(self, function, *api_args):
+    def _call_and_return_raw_output(self, function, *api_args):
+        '''Invoke the Thrift method and return the response as a string.
+
+        This should be used when the return type of the Thrift API is 'string'
+        because this is special-cased in the Thrift code:
+        https://fburl.com/ztmtvemb.
+
+        If the return type is anything other than 'string' (or an alias for
+        'string'), use _call() instead.
+        '''
         output = self._call_binary(function, *api_args)
         if output.startswith('Exception:\n'):
             msg = output[len('Exception:\n'):]
             raise Exception(msg)
+        return output
+
+    def _call(self, function, *api_args):
+        output = self._call_and_return_raw_output(function, *api_args)
 
         # Make sure we compile without inheriting the flags used by the current
         # source file.  In particular we want to make sure the unicode_literals

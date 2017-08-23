@@ -178,7 +178,7 @@ class EdenThriftClient(object):
 
     def hgCopyMapPut(self, relativePathDest, relativePathSource):
         # type(str, str) -> None
-        return self._client.hgCopyMapGet(self._root, relativePathDest,
+        return self._client.hgCopyMapPut(self._root, relativePathDest,
                                          relativePathSource)
 
     def hgCopyMapGet(self, relativePathDest):
