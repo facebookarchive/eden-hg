@@ -262,11 +262,11 @@ class eden_dirstate(dirstate.dirstate):
                     if exception.errno != errno.ENOENT:
                         raise
 
-            return [f for f in candidates if match(f)]
-
-        matched_files = self._eden_walk_helper(
-            match, deleted=True, unknown=unknown, ignored=ignored
-        )
+            matched_files = [f for f in candidates if match(f)]
+        else:
+            matched_files = self._eden_walk_helper(
+                match, deleted=True, unknown=unknown, ignored=ignored
+            )
 
         # Now we need to build a stat-like-object for each of these results
         file_info = self.eden_client.getFileInformation(matched_files)
