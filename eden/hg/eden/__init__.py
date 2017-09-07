@@ -80,21 +80,21 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
     assert node is not None
 
     if not util.safehasattr(repo.dirstate, 'eden_client'):
-        # This is not an eden repository
-        useeden = False
+        why_not_eden = 'This is not an eden repository.'
     if matcher is not None and not matcher.always():
-        # We don't support doing a partial update through eden yet.
-        useeden = False
-    elif branchmerge or ancestor is not None:
-        useeden = False
+        why_not_eden = 'We don\'t support doing a partial update through eden yet.'
+    elif branchmerge:
+        why_not_eden = 'branchmerge is "truthy:" %s.' % branchmerge
+    elif ancestor is not None:
+        why_not_eden = 'ancestor is not None: %s.' % ancestor
     else:
-        # TODO: We probably also need to set useeden = False if there are
+        # TODO: We probably also need to set why_not_eden if there are
         # subrepositories.  (Personally I might vote for just not supporting
         # subrepos in eden.)
-        useeden = True
+        why_not_eden = None
 
-    if not useeden:
-        repo.ui.debug('falling back to non-eden update code path\n')
+    if why_not_eden:
+        repo.ui.debug('falling back to non-eden update code path: %s\n' % why_not_eden)
         return orig(repo, node, branchmerge, force, ancestor=ancestor,
                     mergeancestor=mergeancestor, labels=labels, matcher=matcher,
                     mergeforce=mergeforce)
