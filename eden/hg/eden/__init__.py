@@ -153,7 +153,7 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
 
         with repo.dirstate.parentchange():
             # TODO(mbolin): Set the second parent, if appropriate.
-            repo.setparents(node)
+            repo.setparents(destctx.node())
 
             # Clear the update state
             util.unlink(repo.vfs.join('updatestate'))
