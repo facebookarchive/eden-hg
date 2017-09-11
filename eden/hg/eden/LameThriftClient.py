@@ -116,7 +116,7 @@ class LameThriftClient(object):
         output = self._call_binary(function, *api_args)
         if output.startswith('Exception:\n'):
             msg = output[len('Exception:\n'):]
-            raise Exception(msg)
+            raise eval(msg)
         return output
 
     def _call(self, function, *api_args):
@@ -171,6 +171,20 @@ def create_thrift_client(eden_dir=None, mounted_path=None):
 # !!! HAND-GENERATED PYTHON CLASSES BASED ON eden.thrift !!!
 # See buck-out/gen/eden/fs/service/thrift-py-eden.thrift/gen-py/facebook/eden/ttypes.py
 # for real Python codegen.
+class TException(Exception):
+    def __init__(self, message=None):
+        Exception.__init__(self, message)
+        self.message = message
+
+
+class NoValueForKeyError(TException):
+    def __init__(self, key=None):
+        self.key = key
+
+    def __repr__(self):
+        return ('NoValueForKeyError(key=%r)' % self.key)
+
+
 class WorkingDirectoryParents(object):
     def __init__(self, parent1=None, parent2=None,):
         self.parent1 = parent1

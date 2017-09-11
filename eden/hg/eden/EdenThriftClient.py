@@ -67,6 +67,7 @@ StatusCode = eden_ttypes.StatusCode
 ConflictType = eden_ttypes.ConflictType
 FileInformationOrError = eden_ttypes.FileInformationOrError
 HgNonnormalFile = eden_ttypes.HgNonnormalFile
+NoValueForKeyError = eden_ttypes.NoValueForKeyError
 
 DirstateCopymap = hg_ttypes.DirstateCopymap
 DirstateMergeState = hg_ttypes.DirstateMergeState

@@ -44,8 +44,8 @@ class eden_dirstate_map(collections.MutableMapping):
             thrift_dirstate_tuple = self._thrift_client.hgGetDirstateTuple(
                 filename
             )
-        except:  # noqa: B901
-            raise KeyError(filename)
+        except thrift.NoValueForKeyError as e:
+            raise KeyError(e.key)
 
         return thrift_dirstate_tuple_to_parsers_dirstatetuple(
             thrift_dirstate_tuple

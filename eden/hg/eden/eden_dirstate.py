@@ -55,8 +55,8 @@ class dummy_copymap(collections.MutableMapping):
         # type(str) -> str
         try:
             return self._thrift_client.hgCopyMapGet(dest_filename)
-        except:  # noqa: B901
-            raise KeyError(dest_filename)
+        except thrift.NoValueForKeyError as e:
+            raise KeyError(e.key)
 
     def __setitem__(self, dest_filename, source_filename):
         self._thrift_client.hgCopyMapPut(dest_filename, source_filename)
