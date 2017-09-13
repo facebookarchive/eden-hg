@@ -52,10 +52,6 @@ def extsetup(ui):
     extensions.wrapfunction(matchmod, 'exact', wrap_match_exact)
     orig.paths = ()
 
-    if thrift.thrift_client_type != 'native':
-        ui.warn(_('unable to import native thrift client for eden; '
-                  'falling back to pyremote invocation\n'))
-
 
 def invalidatedirstate(orig, self):
     if _requirement in self.requirements:
