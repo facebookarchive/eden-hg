@@ -274,9 +274,14 @@ class EdenMatchInfo(object):
                 globs.append(pat)
                 continue
             if kind in ('relpath', 'path'):
-                base_dir = self._root if kind == 'path' else self._cwd
-                # An "exact" matcher always matches files only.
-                if not self._exact and os.path.isdir(os.path.join(base_dir, pat)):
+                # When a 'relpath' pattern is passed to matchmod.match(), pat is
+                # relative to cwd. However, before it is passed to
+                # EdenMatchInfo, it is normalized via matchmod._donormalize(),
+                # so now pat is relative to self._root.
+                #
+                # An "exact" matcher should always match files only.
+                if not self._exact and os.path.isdir(os.path.join(self._root,
+                                                                  pat)):
                     globs.append(pat + '/**/*')
                 else:
                     globs.append(pat)
@@ -328,7 +333,6 @@ def wrap_match(orig, root, cwd, patterns, include=None, exclude=None,
                               the same directory
         '<something>' - a pattern of the specified default type
     '''
-
     res = orig(root, cwd, patterns, include, exclude, default,
                exact, auditor, ctx, listsubrepos, warn, badfn, icasefs)
 
