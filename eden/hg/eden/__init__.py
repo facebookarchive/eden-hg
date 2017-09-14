@@ -282,7 +282,14 @@ class EdenMatchInfo(object):
                 # An "exact" matcher should always match files only.
                 if not self._exact and os.path.isdir(os.path.join(self._root,
                                                                   pat)):
-                    globs.append(pat + '/**/*')
+                    if pat == '':
+                        # In general, we should be wary if the user is
+                        # attempting something that will match all of the files
+                        # in the repo. Nevertheless, we should let it go
+                        # through.
+                        globs.append('**/*')
+                    else:
+                        globs.append(pat + '/**/*')
                 else:
                     globs.append(pat)
                 continue
