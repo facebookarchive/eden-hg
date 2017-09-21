@@ -293,7 +293,7 @@ ConflictType = _define_enum(
     'UNTRACKED_ADDED',
     'REMOVED_MODIFIED',
     'MISSING_REMOVED',
-    'MODIFIED')
+    'MODIFIED_MODIFIED')
 
 
 class TimeSpec(object):

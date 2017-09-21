@@ -218,7 +218,7 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts):
             # locally in the working directory before, and it was removed
             # in the new commit.
             continue
-        elif conflict.type == ConflictType.MODIFIED:
+        elif conflict.type == ConflictType.MODIFIED_MODIFIED:
             action_type = 'm'
             action = (conflict.path, conflict.path, conflict.path,
                       False, src.node())
