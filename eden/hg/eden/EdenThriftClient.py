@@ -30,11 +30,27 @@ from mercurial import demandimport
 # them.
 with demandimport.deactivated():
     try:
-        # The native thrift code requires a new enough version of python
-        # where struct.pack() accepts format strings as unicode.
         if sys.version_info < (2, 7, 6):
-            raise Exception('python version is too old to use '
-                            'the native thrift client')
+            # 2.7.6 was the first version to allow unicode format strings in
+            # struct.{pack,unpack}; our devservers have 2.7.5, so let's
+            # monkey patch in support for unicode format strings.
+            import struct
+
+            orig_pack = struct.pack
+            orig_unpack = struct.unpack
+
+            def wrap_pack(fmt, *args):
+                if isinstance(fmt, unicode):
+                    fmt = fmt.encode('utf-8')
+                return orig_pack(fmt, *args)
+
+            def wrap_unpack(fmt, data):
+                if isinstance(fmt, unicode):
+                    fmt = fmt.encode('utf-8')
+                return orig_unpack(fmt, data)
+
+            struct.pack = wrap_pack
+            struct.unpack = wrap_unpack
 
         # Look for the native thrift client relative to our local file.
         #
