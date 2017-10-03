@@ -119,10 +119,17 @@ class ClientStatus(object):
 class EdenThriftClient(object):
     def __init__(self, repo):
         self._root = repo.root
-        self._client = create_thrift_client(mounted_path=self._root)
-        # TODO: It would be nicer to use a context manager to make sure we
-        # close the client appropriately.
-        self._client.open()
+
+    def _get_client(self):
+        '''
+        Create a new client instance for each call because we may be idle
+        (from the perspective of the server) between calls and have our
+        connection snipped by the server.
+        We could potentially try to speculatively execute a call and
+        reconnect on transport failure, but for the moment this strategy
+        is a reasonable compromise.
+        '''
+        return create_thrift_client(mounted_path=self._root)
 
     def getParentCommits(self):
         '''
@@ -135,7 +142,8 @@ class EdenThriftClient(object):
         The second element of the tuple is None if there is only one parent,
         or the second parent ID as a 20-byte binary value.
         '''
-        parents = self._client.getParentCommits(self._root)
+        with self._get_client() as client:
+            parents = client.getParentCommits(self._root)
         return (parents.parent1, parents.parent2)
 
     def setHgParents(self, p1, p2):
@@ -143,11 +151,14 @@ class EdenThriftClient(object):
             p2 = None
 
         parents = eden_ttypes.WorkingDirectoryParents(parent1=p1, parent2=p2)
-        self._client.resetParentCommits(self._root, parents)
+        with self._get_client() as client:
+            client.resetParentCommits(self._root, parents)
 
     def getStatus(self, list_ignored):
         status = ClientStatus()
-        thrift_hg_status = self._client.scmGetStatus(self._root, list_ignored)
+        with self._get_client() as client:
+            thrift_hg_status = client.scmGetStatus(self._root, list_ignored)
+
         for path, code in thrift_hg_status.entries.iteritems():
             if code == StatusCode.MODIFIED:
                 status.modified.append(path)
@@ -168,40 +179,51 @@ class EdenThriftClient(object):
         return status
 
     def checkout(self, node, force):
-        return self._client.checkOutRevision(self._root, node, force)
+        with self._get_client() as client:
+            return client.checkOutRevision(self._root, node, force)
 
     def glob(self, globs):
-        return self._client.glob(self._root, globs)
+        with self._get_client() as client:
+            return client.glob(self._root, globs)
 
     def getFileInformation(self, files):
-        return self._client.getFileInformation(self._root, files)
+        with self._get_client() as client:
+            return client.getFileInformation(self._root, files)
 
     def hgClearDirstate(self):
-        return self._client.hgClearDirstate(self._root)
+        with self._get_client() as client:
+            client.hgClearDirstate(self._root)
 
     def hgGetDirstateTuple(self, relativePath):
-        return self._client.hgGetDirstateTuple(self._root, relativePath)
+        with self._get_client() as client:
+            return client.hgGetDirstateTuple(self._root, relativePath)
 
     def hgSetDirstateTuple(self, relativePath, dirstateTuple):
-        return self._client.hgSetDirstateTuple(self._root, relativePath,
+        with self._get_client() as client:
+            return client.hgSetDirstateTuple(self._root, relativePath,
                                                dirstateTuple)
 
     def hgDeleteDirstateTuple(self, relativePath):
-        return self._client.hgDeleteDirstateTuple(self._root, relativePath)
+        with self._get_client() as client:
+            return client.hgDeleteDirstateTuple(self._root, relativePath)
 
     def hgGetNonnormalFiles(self):
         # type() -> List[HgNonnormalFile]
-        return self._client.hgGetNonnormalFiles(self._root)
+        with self._get_client() as client:
+            return client.hgGetNonnormalFiles(self._root)
 
     def hgCopyMapPut(self, relativePathDest, relativePathSource):
         # type(str, str) -> None
-        return self._client.hgCopyMapPut(self._root, relativePathDest,
+        with self._get_client() as client:
+            return client.hgCopyMapPut(self._root, relativePathDest,
                                          relativePathSource)
 
     def hgCopyMapGet(self, relativePathDest):
         # type(str) -> str
-        return self._client.hgCopyMapGet(self._root, relativePathDest)
+        with self._get_client() as client:
+            return client.hgCopyMapGet(self._root, relativePathDest)
 
     def hgCopyMapGetAll(self):
         # type(str) -> Dict[str, str]
-        return self._client.hgCopyMapGetAll(self._root)
+        with self._get_client() as client:
+            return client.hgCopyMapGetAll(self._root)

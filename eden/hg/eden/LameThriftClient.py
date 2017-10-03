@@ -36,6 +36,12 @@ class LameThriftClient(object):
         # avoid any potential overhead when reading this path later.
         self._eden_socket = os.path.realpath(eden_socket)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self):
+        pass
+
     def open(self):
         pass
 
