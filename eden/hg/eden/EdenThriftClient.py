@@ -21,6 +21,36 @@ import sys
 from mercurial import node
 from mercurial import demandimport
 
+
+if sys.version_info < (2, 7, 6):
+    # 2.7.6 was the first version to allow unicode format strings in
+    # struct.{pack,unpack}; our devservers have 2.7.5, so let's
+    # monkey patch in support for unicode format strings.
+    import struct
+
+    orig_pack = struct.pack
+    orig_unpack = struct.unpack
+
+    def wrap_pack(fmt, *args):
+        if isinstance(fmt, unicode):
+            fmt = fmt.encode('utf-8')
+        return orig_pack(fmt, *args)
+
+    def wrap_unpack(fmt, data):
+        if isinstance(fmt, unicode):
+            fmt = fmt.encode('utf-8')
+        return orig_unpack(fmt, data)
+
+    struct.pack = wrap_pack
+    struct.unpack = wrap_unpack
+
+# Look for the native thrift client relative to our local file.
+#
+# Our file should be "hgext3rd/eden/__init__.py", inside a directory
+# that also contains the other thrift modules required to talk to eden.
+archive_root = os.path.normpath(os.path.join(__file__, '../../..'))
+sys.path.insert(0, archive_root)
+
 # Disable demandimport while importing thrift files.
 #
 # The thrift modules try importing modules which may or may not exist, and they
@@ -29,54 +59,9 @@ from mercurial import demandimport
 # loaded, and only throwing ImportError later when you actually try to use
 # them.
 with demandimport.deactivated():
-    try:
-        if sys.version_info < (2, 7, 6):
-            # 2.7.6 was the first version to allow unicode format strings in
-            # struct.{pack,unpack}; our devservers have 2.7.5, so let's
-            # monkey patch in support for unicode format strings.
-            import struct
-
-            orig_pack = struct.pack
-            orig_unpack = struct.unpack
-
-            def wrap_pack(fmt, *args):
-                if isinstance(fmt, unicode):
-                    fmt = fmt.encode('utf-8')
-                return orig_pack(fmt, *args)
-
-            def wrap_unpack(fmt, data):
-                if isinstance(fmt, unicode):
-                    fmt = fmt.encode('utf-8')
-                return orig_unpack(fmt, data)
-
-            struct.pack = wrap_pack
-            struct.unpack = wrap_unpack
-
-        # Look for the native thrift client relative to our local file.
-        #
-        # Our file should be "hgext3rd/eden/__init__.py", inside a directory
-        # that also contains the other thrift modules required to talk to eden.
-        archive_root = os.path.normpath(os.path.join(__file__, '../../..'))
-        sys.path.insert(0, archive_root)
-
-        import eden.thrift as eden_thrift_module
-        import facebook.eden.ttypes as eden_ttypes
-        import facebook.hgdirstate.ttypes as hg_ttypes
-        thrift_client_type = 'native'
-    except Exception:
-        # If we fail to import eden.thrift, fall back to using the
-        # LameThriftClient module for now.  At the moment we build the
-        # eden.thrift modules with fairly recent versions of gcc and glibc, but
-        # mercurial is often invoked with the system version of python, which
-        # cannot import modules compiled against newer glibc versions.
-        #
-        # Eventually this fallback should be removed once we make sure
-        # mercurial is always deployed to use our newer python builds.  For now
-        # it is in place to ease development.
-        from . import LameThriftClient as eden_thrift_module
-        eden_ttypes = eden_thrift_module
-        from . import LameHgTypes as hg_ttypes
-        thrift_client_type = 'lame'
+    import eden.thrift as eden_thrift_module
+    import facebook.eden.ttypes as eden_ttypes
+    import facebook.hgdirstate.ttypes as hg_ttypes
 
 create_thrift_client = eden_thrift_module.create_thrift_client
 StatusCode = eden_ttypes.StatusCode
