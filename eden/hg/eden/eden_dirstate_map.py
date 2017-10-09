@@ -16,6 +16,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from mercurial import node
 from . import EdenThriftClient as thrift
 import collections
 
@@ -25,6 +26,29 @@ class eden_dirstate_map(collections.MutableMapping):
         # type(eden_dirstate_map, EdenThriftClient) -> None
         self._thrift_client = thrift_client
         self.copymap = eden_dirstate_copymap(thrift_client)
+
+        # self._parents is a cache of the current parent node IDs.
+        # This is a tuple of 2 20-byte binary commit IDs, or None when unset.
+        self._parents = None
+
+    def invalidate(self):
+        self._parents = None
+
+    def parents(self):  # override
+        self._getparents()
+        return list(self._parents)
+
+    def setparents(self, p1, p2):  # override
+        '''Set dirstate parents to p1 and p2.'''
+        self._thrift_client.setHgParents(p1, p2)
+        self._parents = (p1, p2)
+
+    def _getparents(self):
+        if self._parents is None:
+            p1, p2 = self._thrift_client.getParentCommits()
+            if p2 is None:
+                p2 = node.nullid
+            self._parents = (p1, p2)
 
     def __getitem__(self, filename):
         # type(str) -> parsers.dirstatetuple

@@ -64,10 +64,6 @@ class eden_dirstate(dirstate.dirstate):
 
         self._repo = repo
 
-        # self._parents is a cache of the current parent node IDs.
-        # This is a tuple of 2 20-byte binary commit IDs, or None when unset.
-        self._parents = None
-
     def __iter__(self):
         # FIXME: This appears to be called by `hg reset`, so we provide a dummy
         # response here, but really, we should outright prohibit this.
@@ -103,29 +99,14 @@ class eden_dirstate(dirstate.dirstate):
             result.add(f)
         return result
 
-    def _getparents(self):
-        if self._parents is None:
-            p1, p2 = self.eden_client.getParentCommits()
-            if p2 is None:
-                p2 = node.nullid
-            self._parents = (p1, p2)
-
     def parents(self):  # override
-        self._getparents()
-        return list(self._parents)
+        return self._map.parents()
 
     def p1(self):  # override
-        self._getparents()
-        return self._parents[0]
+        return self._map.parents()[0]
 
     def p2(self):  # override
-        self._getparents()
-        return self._parents[1]
-
-    @property
-    def _pl(self):
-        '''I assume pl = "parents list"?'''
-        return self.parents()
+        return self._map.parents()[1]
 
     def __setattr__(self, key, value):
         if key == '_pl':
@@ -164,14 +145,13 @@ class eden_dirstate(dirstate.dirstate):
         if txn is not None:
             txn.writepending()
 
-        self.eden_client.setHgParents(p1_node, p2_node)
-        self._parents = (p1_node, p2_node)
+        self._map.setparents(p1_node, p2_node)
 
         # TODO(mbolin): `return copies` as the superclass does?
 
     def invalidate(self):  # override
         super(eden_dirstate, self).invalidate()
-        self._parents = None
+        self._eden_map_impl.invalidate()
 
     def clear(self):  # override
         '''Intended to match superclass implementation except for changes to
