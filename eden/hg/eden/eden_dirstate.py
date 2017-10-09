@@ -23,7 +23,6 @@ except ImportError:
 
 from . import EdenThriftClient as thrift
 from . import eden_dirstate_map as eden_dirstate_map
-import collections
 import stat
 import os
 
@@ -42,56 +41,12 @@ class statobject(object):
         self.st_mtime = mtime
 
 
-class dummy_copymap(collections.MutableMapping):
-    def __init__(self, thrift_client):
-        # type(dummy_copymap, EdenThriftClient) -> None
-        self._thrift_client = thrift_client
-
-    def _get_mapping_thrift(self):
-        # type(dummy_copymap) -> Dict[str, str]
-        return self._thrift_client.hgCopyMapGetAll()
-
-    def __getitem__(self, dest_filename):
-        # type(str) -> str
-        try:
-            return self._thrift_client.hgCopyMapGet(dest_filename)
-        except thrift.NoValueForKeyError as e:
-            raise KeyError(e.key)
-
-    def __setitem__(self, dest_filename, source_filename):
-        self._thrift_client.hgCopyMapPut(dest_filename, source_filename)
-
-    def __delitem__(self, dest_filename):
-        # TODO(mbolin): Setting the value to '' deletes it from the map. This
-        # would be better as an explicit "remove" API.
-        self._thrift_client.hgCopyMapPut(dest_filename, '')
-
-    def __iter__(self):
-        return iter(self._get_mapping_thrift())
-
-    def __len__(self):
-        raise Exception('Should not call __len__ on dummy_copymap!')
-
-    def keys(self):
-        # collections.MutableMapping implements keys(), but does so poorly--
-        # it ends up calling __iter__() and then __len__(), and we want to
-        # avoid making two separate thrift calls.
-        return self._get_mapping_thrift().keys()
-
-    def copy(self):
-        # We return a new dict object, and not dummy_copymap() object.
-        # Any mutations made to the returned copy should not affect the actual
-        # dirstate, and should not be sent back to eden via thrift.
-        return self._get_mapping_thrift().copy()
-
-
 class eden_dirstate(dirstate.dirstate):
     def __init__(self, repo, ui, root):
         self.eden_client = thrift.EdenThriftClient(repo)
         self._eden_map_impl = eden_dirstate_map.eden_dirstate_map(
             self.eden_client
         )
-        self._eden_copymap_impl = dummy_copymap(self.eden_client)
 
         # We should override any logic in dirstate that uses self._validate.
         validate = None
@@ -124,10 +79,6 @@ class eden_dirstate(dirstate.dirstate):
     @property
     def _map(self):  # override
         return self._eden_map_impl
-
-    @property
-    def _copymap(self):  # override
-        return self._eden_copymap_impl
 
     def _read(self):  # override
         pass

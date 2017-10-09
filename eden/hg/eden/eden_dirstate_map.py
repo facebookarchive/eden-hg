@@ -24,6 +24,7 @@ class eden_dirstate_map(collections.MutableMapping):
     def __init__(self, thrift_client):
         # type(eden_dirstate_map, EdenThriftClient) -> None
         self._thrift_client = thrift_client
+        self.copymap = eden_dirstate_copymap(thrift_client)
 
     def __getitem__(self, filename):
         # type(str) -> parsers.dirstatetuple
@@ -144,3 +145,46 @@ def thrift_merge_status_to_code(thrift_merge_status):
         return -1
     elif tms == thrift.DirstateMergeState.OtherParent:
         return -2
+
+
+class eden_dirstate_copymap(collections.MutableMapping):
+    def __init__(self, thrift_client):
+        # type(eden_dirstate_copymap, EdenThriftClient) -> None
+        self._thrift_client = thrift_client
+
+    def _get_mapping_thrift(self):
+        # type(eden_dirstate_copymap) -> Dict[str, str]
+        return self._thrift_client.hgCopyMapGetAll()
+
+    def __getitem__(self, dest_filename):
+        # type(str) -> str
+        try:
+            return self._thrift_client.hgCopyMapGet(dest_filename)
+        except thrift.NoValueForKeyError as e:
+            raise KeyError(e.key)
+
+    def __setitem__(self, dest_filename, source_filename):
+        self._thrift_client.hgCopyMapPut(dest_filename, source_filename)
+
+    def __delitem__(self, dest_filename):
+        # TODO(mbolin): Setting the value to '' deletes it from the map. This
+        # would be better as an explicit "remove" API.
+        self._thrift_client.hgCopyMapPut(dest_filename, '')
+
+    def __iter__(self):
+        return iter(self._get_mapping_thrift())
+
+    def __len__(self):
+        raise Exception('Should not call __len__ on eden_dirstate_copymap!')
+
+    def keys(self):
+        # collections.MutableMapping implements keys(), but does so poorly--
+        # it ends up calling __iter__() and then __len__(), and we want to
+        # avoid making two separate thrift calls.
+        return self._get_mapping_thrift().keys()
+
+    def copy(self):
+        # We return a new dict object, and not eden_dirstate_copymap() object.
+        # Any mutations made to the returned copy should not affect the actual
+        # dirstate, and should not be sent back to eden via thrift.
+        return self._get_mapping_thrift().copy()
