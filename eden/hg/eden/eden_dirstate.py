@@ -121,12 +121,20 @@ class eden_dirstate(dirstate.dirstate):
             return super(eden_dirstate, self).__setattr__(key, value)
 
     def setparents(self, p1, p2=node.nullid):  # override
-        '''Set dirstate parents to p1 and p2.'''
+        '''Set dirstate parents to p1 and p2.
+
+        When moving from two parents to one, 'm' merged entries a
+        adjusted to normal and previous copy records discarded and
+        returned by the call.
+
+        See localrepo.setparents()
+        '''
         if self._parentwriters == 0:
             raise ValueError(
                 'cannot set dirstate parent without '
                 'calling dirstate.beginparentchange'
             )
+        oldp2 = self._map.parents()[1]
 
         # Normalize p1 and p2 to hashes in case either is passed in as a
         # revision number.
@@ -147,7 +155,27 @@ class eden_dirstate(dirstate.dirstate):
 
         self._map.setparents(p1_node, p2_node)
 
-        # TODO(mbolin): `return copies` as the superclass does?
+        copies = {}
+        if oldp2 != node.nullid and p2_node == node.nullid:
+            candidatefiles = self._nonnormalset.union(self._otherparentset)
+            for f in candidatefiles:
+                s = self._map.get(f)
+                if s is None:
+                    continue
+
+                # Discard 'm' markers when moving away from a merge state
+                if s[0] == 'm':
+                    source = self._map.copymap.get(f)
+                    if source:
+                        copies[f] = source
+                    self.normallookup(f)
+                # Also fix up otherparent markers
+                elif s[0] == 'n' and s[2] == -2:
+                    source = self._map.copymap.get(f)
+                    if source:
+                        copies[f] = source
+                    self.add(f)
+        return copies
 
     def invalidate(self):  # override
         super(eden_dirstate, self).invalidate()
