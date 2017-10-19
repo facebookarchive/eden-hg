@@ -135,6 +135,17 @@ class eden_dirstate_map(collections.MutableMapping):
                     ] = thrift_dirstate_tuple_to_parsers_dirstatetuple(t.tuple)
         return entries
 
+    @property
+    def nonnormalset(self):
+        return self.nonnormalentries()
+
+    @property
+    def otherparentset(self):  # override
+        result = set()
+        for f, _s in self.otherparententries():
+            result.add(f)
+        return result
+
 
 def thrift_dirstate_tuple_to_parsers_dirstatetuple(thrift_dirstate_tuple):
     return [

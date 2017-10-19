@@ -88,17 +88,6 @@ class eden_dirstate(dirstate.dirstate):
     def dirs(self):  # override
         raise NotImplementedError('eden_dirstate.dirs()')
 
-    @property
-    def _nonnormalset(self):  # override
-        return self._map.nonnormalentries()
-
-    @property
-    def _otherparentset(self):  # override
-        result = set()
-        for f, s in self._map.otherparententries():
-            result.add(f)
-        return result
-
     def parents(self):  # override
         return self._map.parents()
 
@@ -157,7 +146,8 @@ class eden_dirstate(dirstate.dirstate):
 
         copies = {}
         if oldp2 != node.nullid and p2_node == node.nullid:
-            candidatefiles = self._nonnormalset.union(self._otherparentset)
+            candidatefiles = self._map.nonnormalset.union(
+                self._map.otherparentset)
             for f in candidatefiles:
                 s = self._map.get(f)
                 if s is None:
