@@ -23,6 +23,7 @@ except ImportError:
 
 from . import EdenThriftClient as thrift
 from . import eden_dirstate_map as eden_dirstate_map
+import binascii
 import stat
 import os
 
@@ -339,8 +340,45 @@ class eden_dirstate(dirstate.dirstate):
         self._map[f] = dirstatetuple(state, mode, size, mtime)
 
     def write(self, tr):  # override
-        '''This appears to be called from localrepo.'''
-        pass
+        # type(eden_dirstate, Optional[transaction]) -> None
+        '''This writes the .hg/dirstate file or schedules it to be written when
+        the transaction closes. In general, we do not care about the existence
+        or contents of this file, but Nuclide uses changes to this file as a
+        proxy for whether Hg's state has changed such that is should invalidate
+        its caches for Hg data. Once we have a better mechanism for broadcasting
+        changes and update Nuclide to use it, we may want to make this method a
+        no-op.
+
+        Note: This appears to be called from localrepo.'''
+        filename = self._filename
+        if tr:
+            # emulate that all 'dirstate.normal' results are written out
+            self._lastnormaltime = 0
+            self._updatedfiles.clear()
+
+            # delay writing in-memory changes out
+            tr.addfilegenerator('dirstate', (self._filename,),
+                                self._eden_writedirstate, location='plain')
+            return
+
+        st = self._opener(filename, 'w', atomictemp=True, checkambig=True)
+        self._eden_writedirstate(st)
+
+    def _eden_writedirstate(self, st):
+        # We preserve the parents at the start of the dirstate for compatibility
+        # with some other tools (such as our scm-prompt and hg whereami
+        # wrappers) that peek at them as a quick way to find out the current
+        # commit. Aside from that, the contents that we write do not matter, so
+        # we might as well write out something that is useful for debugging.
+        st.write(''.join(self.parents()))
+        st.write('\n#edendirstate')
+        st.write('\nThis is a fake dirstate put here by eden_dirstate.\n')
+        st.write(' '.join(map(binascii.hexlify, self.parents())) + '\n')
+        st.close()
+
+    def _writedirstate(self, st):  # override
+        raise NotImplementedError(
+            'No one should try to invoke _writedirstate() in eden_dirstate.')
 
     def savebackup(self, tr, backupname):  # override
         '''Save current dirstate into backup file'''
@@ -356,10 +394,6 @@ class eden_dirstate(dirstate.dirstate):
             # failure, even if tr.writepending isn't invoked until the
             # end of this transaction
             tr.registertmp(backupname, location='plain')
-
-    def _writedirstate(self, st):  # override
-        raise NotImplementedError(
-            'No one should try to invoke _writedirstate() in eden_dirstate.')
 
     def restorebackup(self, tr, backupname):  # override
         '''

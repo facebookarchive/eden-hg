@@ -31,26 +31,14 @@ _repoclass._basesupported.add(_requirement)
 
 
 def extsetup(ui):
-    # Wrap the localrepo.dirstate() function.
-    #
-    # The original dirstate attribute is a filecache object, and needs slightly
-    # special handling to wrap properly.
-    #
-    # (The fsmonitor and sqldirstate extensions both already wrap it, and each
-    # has slightly different mechanisms for doing so.  Here we wrap it more
-    # like sqldirstate does.  Ideally code for wrapping filecache objects
-    # should just get put into core mercurial.)
-    orig = localrepo.localrepository.dirstate
     # For some reason, localrepository.invalidatedirstate() does not call
     # dirstate.invalidate() by default, so we must wrap it.
     extensions.wrapfunction(localrepo.localrepository, 'invalidatedirstate',
                             invalidatedirstate)
     extensions.wrapfunction(mergemod, 'update', merge_update)
     extensions.wrapfunction(hg, '_showstats', update_showstats)
-    extensions.wrapfunction(orig, 'func', wrapdirstate)
     extensions.wrapfunction(matchmod, 'match', wrap_match)
     extensions.wrapfunction(matchmod, 'exact', wrap_match_exact)
-    orig.paths = ()
 
 
 def invalidatedirstate(orig, self):
@@ -240,20 +228,40 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts):
 
 
 def reposetup(ui, repo):
-    # TODO: We probably need some basic sanity checking here:
-    # - is this an eden client?
-    # - are any conflicting extensions enabled?
-    pass
-
-
-def wrapdirstate(orig, repo):
     # Only override when actually inside an eden client directory.
     if _requirement not in repo.requirements:
-        return orig(repo)
+        return
 
-    # have the edendirstate class implementation more complete.
+    # Replace the localrepo.dirstate property.
     from . import eden_dirstate as dirstate_reimplementation
-    return dirstate_reimplementation.eden_dirstate(repo, repo.ui, repo.root)
+    dirstate = dirstate_reimplementation.eden_dirstate(repo, repo.ui, repo.root)
+
+    # The fbsparse extension categorically assigns a .repo property to every
+    # dirstate created via localrepo.localrepository.dirstate():
+    #
+    # https://bitbucket.org/facebook/hg-experimental/src/6a9de6c27e3aff105e6b9e693cdb2ec402bb86ef/hgext3rd/fbsparse.py?at=default&fileviewer=file-view-default#fbsparse.py-272
+    #
+    # It then redefines a number of methods on the dirstate class, such as
+    # normal(), add(), etc.:
+    #
+    # https://bitbucket.org/facebook/hg-experimental/src/6a9de6c27e3aff105e6b9e693cdb2ec402bb86ef/hgext3rd/fbsparse.py?at=default&fileviewer=file-view-default#fbsparse.py-326
+    #
+    # In the redefined version of these methods, it expects the .repo property
+    # to be present on the dirstate, throwing an AttributeError if it is not
+    # present:
+    #
+    # https://bitbucket.org/facebook/hg-experimental/src/6a9de6c27e3aff105e6b9e693cdb2ec402bb86ef/hgext3rd/fbsparse.py?at=default&fileviewer=file-view-default#fbsparse.py-331
+    #
+    # Even though the dirstate we just created does not go through fbsparse's
+    # wrapper, it still inherits the wrapped methods that were redefined on its
+    # superclass by fbsparse. To ensure those methods still work as expected, we
+    # assign a .repo property to eden_dirstate, but the long-term fix is to
+    # modify fbsparse so that it only redefines methods on an instance of
+    # dirstate for which sparse should be enabled. Once that fix is made, this
+    # line of code should be removed:
+    dirstate.repo = repo
+
+    repo.dirstate = dirstate
 
 
 class EdenMatchInfo(object):
