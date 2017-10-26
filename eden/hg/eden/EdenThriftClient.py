@@ -175,6 +175,14 @@ class EdenThriftClient(object):
         with self._get_client() as client:
             return client.getFileInformation(self._root, files)
 
+    def hgBackupDirstate(self, backupname):
+        with self._get_client() as client:
+            client.hgBackupDirstate(self._root, backupname)
+
+    def hgRestoreDirstateFromBackup(self, backupname):
+        with self._get_client() as client:
+            client.hgRestoreDirstateFromBackup(self._root, backupname)
+
     def hgClearDirstate(self):
         with self._get_client() as client:
             client.hgClearDirstate(self._root)

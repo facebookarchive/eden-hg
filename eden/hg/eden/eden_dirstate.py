@@ -388,6 +388,7 @@ class eden_dirstate(dirstate.dirstate):
         parents = self.parents()
         backup_file.write(parents[0] + parents[1])
         backup_file.close()
+        self.eden_client.hgBackupDirstate(backupname)
 
         if tr:
             # ensure that pending file written above is unlinked at
@@ -415,6 +416,7 @@ class eden_dirstate(dirstate.dirstate):
 
         with self.parentchange():
             self.setparents(p1, p2)
+            self.eden_client.hgRestoreDirstateFromBackup(backupname)
 
         self._opener.tryunlink(backupname)
 
