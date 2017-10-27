@@ -46,7 +46,8 @@ class eden_dirstate(dirstate.dirstate):
     def __init__(self, repo, ui, root):
         self.eden_client = thrift.EdenThriftClient(repo)
         self._eden_map_impl = eden_dirstate_map.eden_dirstate_map(
-            self.eden_client
+            self.eden_client,
+            repo
         )
 
         # We should override any logic in dirstate that uses self._validate.
@@ -136,12 +137,6 @@ class eden_dirstate(dirstate.dirstate):
             p2_node = self._repo.lookup(p2)
         else:
             p2_node = p2
-
-        # If a transaction is currently in progress, make sure it has flushed
-        # pending commit data to disk so that eden will be able to access it.
-        txn = self._repo.currenttransaction()
-        if txn is not None:
-            txn.writepending()
 
         self._map.setparents(p1_node, p2_node)
 

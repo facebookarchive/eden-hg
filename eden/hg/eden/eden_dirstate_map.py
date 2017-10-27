@@ -22,9 +22,10 @@ import collections
 
 
 class eden_dirstate_map(collections.MutableMapping):
-    def __init__(self, thrift_client):
-        # type(eden_dirstate_map, EdenThriftClient) -> None
+    def __init__(self, thrift_client, repo):
+        # type(eden_dirstate_map, EdenThriftClient, localrepo) -> None
         self._thrift_client = thrift_client
+        self._repo = repo
         self.copymap = eden_dirstate_copymap(thrift_client)
 
         # self._parents is a cache of the current parent node IDs.
@@ -40,6 +41,13 @@ class eden_dirstate_map(collections.MutableMapping):
 
     def setparents(self, p1, p2):  # override
         '''Set dirstate parents to p1 and p2.'''
+
+        # If a transaction is currently in progress, make sure it has flushed
+        # pending commit data to disk so that eden will be able to access it.
+        txn = self._repo.currenttransaction()
+        if txn is not None:
+            txn.writepending()
+
         self._thrift_client.setHgParents(p1, p2)
         self._parents = (p1, p2)
 
