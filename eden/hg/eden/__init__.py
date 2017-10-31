@@ -175,7 +175,22 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts):
     # desired behavior.
 
     # Build a list of actions to pass to mergemod.applyupdates()
-    actions = dict((m, []) for m in 'a am f g cd dc r dm dg m e k'.split())
+    actions = dict((m, []) for m in [
+        'a',
+        'am',
+        'cd',
+        'dc',
+        'dg',
+        'dm',
+        'e',
+        'f',
+        'g',
+        'k',
+        'm',
+        'p',  # path conflicts
+        'pr',  # files to rename
+        'r',
+    ])
     numerrors = 0
     for conflict in conflicts:
         # The action tuple is:
