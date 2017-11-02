@@ -24,6 +24,7 @@ except ImportError:
 from . import EdenThriftClient as thrift
 from . import eden_dirstate_map as eden_dirstate_map
 import binascii
+import errno
 import stat
 import os
 
@@ -203,8 +204,11 @@ class eden_dirstate(dirstate.dirstate):
                     if stat.S_ISREG(mode) or stat.S_ISLNK(mode):
                         candidates.append(removed_file)
                 except OSError as exception:
-                    import errno
-                    if exception.errno != errno.ENOENT:
+                    err = exception.errno
+                    # As the file has likely been removed, it's expected that
+                    # the path may not exist, or one of the components of the
+                    # path prefix is not a directory.
+                    if err != errno.ENOENT and err != errno.ENOTDIR:
                         raise
 
             matched_files = [f for f in candidates if match(f)]
