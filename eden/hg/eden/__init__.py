@@ -15,6 +15,16 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
+import sys
+
+# Update sys.path so that we can find modules that we need.
+#
+# Our file should be "hgext3rd/eden/__init__.py", inside a directory
+# that also contains the other eden library modules.
+archive_root = os.path.normpath(os.path.join(__file__, '../../..'))
+sys.path.insert(0, archive_root)
+
 from mercurial import (
     error, extensions, hg, localrepo, util
 )
@@ -23,7 +33,6 @@ from mercurial.i18n import _
 from mercurial import match as matchmod
 from . import EdenThriftClient as thrift
 ConflictType = thrift.ConflictType
-import os
 
 _requirement = 'eden'
 _repoclass = localrepo.localrepository

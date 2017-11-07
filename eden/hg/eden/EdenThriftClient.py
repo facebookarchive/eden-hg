@@ -16,7 +16,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import os
 import sys
 
 from mercurial import node
@@ -45,13 +44,6 @@ if sys.version_info < (2, 7, 6):
 
     struct.pack = wrap_pack
     struct.unpack = wrap_unpack
-
-# Look for the native thrift client relative to our local file.
-#
-# Our file should be "hgext3rd/eden/__init__.py", inside a directory
-# that also contains the other thrift modules required to talk to eden.
-archive_root = os.path.normpath(os.path.join(__file__, '../../..'))
-sys.path.insert(0, archive_root)
 
 # Disable demandimport while importing thrift files.
 #
