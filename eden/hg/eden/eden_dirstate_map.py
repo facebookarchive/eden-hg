@@ -4,68 +4,124 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2.
 
-'''Eden implementation for the dirstate._map field.
-In practice, this maintains the set of nonnormalfiles in the working copy.
-
-TODO(mbolin): Refactor things so that we can do batch updates in a single Thrift
-call rather than one per __setitem__ call.
-'''
+'''Eden implementation for the dirstatemap class.'''
 
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from mercurial import node
+import errno
+from mercurial import dirstate, util
+from six import iteritems
 from . import EdenThriftClient as thrift
-import collections
+import eden.dirstate
+
+MERGE_STATE_NOT_APPLICABLE = eden.dirstate.MERGE_STATE_NOT_APPLICABLE
+MERGE_STATE_BOTH_PARENTS = eden.dirstate.MERGE_STATE_BOTH_PARENTS
+MERGE_STATE_OTHER_PARENT = eden.dirstate.MERGE_STATE_OTHER_PARENT
+DUMMY_MTIME = 0
 
 
-class eden_dirstate_map(collections.MutableMapping):
-    def __init__(self, thrift_client, repo):
-        # type(eden_dirstate_map, EdenThriftClient, localrepo) -> None
+class eden_dirstate_map(dirstate.dirstatemap):
+    def __init__(self, ui, opener, root, thrift_client, repo):
+        # type(eden_dirstate_map, ui, opener, str, EdenThriftClient) -> None
+        super(eden_dirstate_map, self).__init__(ui, opener, root)
+        # Unlike the default self._map, our values in self._map are tuples of
+        # the form: (status: char, mode: uint32, merge_state: int8).
         self._thrift_client = thrift_client
         self._repo = repo
-        self.copymap = eden_dirstate_copymap(thrift_client)
 
-        # self._parents is a cache of the current parent node IDs.
-        # This is a tuple of 2 20-byte binary commit IDs, or None when unset.
-        self._parents = None
-
-    def invalidate(self):
-        self._parents = None
-
-    def parents(self):  # override
-        self._getparents()
-        return list(self._parents)
-
-    def setparents(self, p1, p2):  # override
-        '''Set dirstate parents to p1 and p2.'''
-
+    def setparents(self, p1, p2):
         # If a transaction is currently in progress, make sure it has flushed
         # pending commit data to disk so that eden will be able to access it.
         txn = self._repo.currenttransaction()
         if txn is not None:
             txn.writepending()
 
+        super(eden_dirstate_map, self).setparents(p1, p2)
+        # TODO(mbolin): Do not make this Thrift call to Eden until the
+        # transaction is committed.
         self._thrift_client.setHgParents(p1, p2)
-        self._parents = (p1, p2)
 
-    def _getparents(self):
-        if self._parents is None:
-            p1, p2 = self._thrift_client.getParentCommits()
-            if p2 is None:
-                p2 = node.nullid
-            self._parents = (p1, p2)
+    def write(self, file, now):  # override
+        # type(eden_dirstate_map, IO[str], float)
+        parents = self.parents()
+
+        # Remove all "clean" entries before writing. (It's possible we should
+        # never allow these to be inserted into self._map in the first place.)
+        to_remove = []
+        for path, v in iteritems(self._map):
+            if v[0] == 'n' and v[2] == MERGE_STATE_NOT_APPLICABLE:
+                to_remove.append(path)
+        for path in to_remove:
+            self._map.pop(path)
+
+        eden.dirstate.write(file, parents, self._map, self.copymap)
+        file.close()
+        self._dirtyparents = False
+        self.nonnormalset, self.otherparentset = self.nonnormalentries()
+
+    def read(self):  # override
+        # ignore HG_PENDING because identity is used only for writing
+        self.identity = util.filestat.frompath(
+            self._opener.join(self._filename)
+        )
+
+        try:
+            fp = self._opendirstatefile()
+            try:
+                parents, dirstate_tuples, copymap = eden.dirstate.read(
+                    fp, self._filename
+                )
+            finally:
+                fp.close()
+        except IOError as e:
+            if e.errno != errno.ENOENT:
+                raise
+            else:
+                # If the dirstate file does not exist, then we silently ignore
+                # the error because that's what Mercurial's dirstate does.
+                return
+
+        if not self._dirtyparents:
+            self.setparents(*parents)
+        self._map = dirstate_tuples
+        self.copymap = copymap
+
+    def iteritems(self):
+        raise Exception('Should not invoke iteritems() on eden_dirstate_map!')
+
+    def __len__(self):
+        raise Exception('Should not invoke __len__ on eden_dirstate_map!')
+
+    def __iter__(self):
+        raise Exception('Should not invoke __iter__ on eden_dirstate_map!')
+
+    def keys(self):
+        raise Exception('Should not invoke keys() on eden_dirstate_map!')
+
+    def get(self, key, default=None):
+        try:
+            return self.__getitem__(key)
+        except KeyError:
+            return default
+
+    def __contains__(self, key):
+        return self.get(key) is not None
 
     def __getitem__(self, filename):
         # type(str) -> parsers.dirstatetuple
+        entry = self._map.get(filename)
+        if entry is not None:
+            status, mode, merge_state = entry
+            return [status, mode, merge_state, DUMMY_MTIME]
         # TODO: Support Hg submodules.
         # Mercurial has a bit of logic that depends on whether .hgsub or
         # .hgsubstate is in the dirstate. Currently, Eden does not attempt to
         # support submodules (and none of Hg's codepaths that use submodules
-        # have been tested with Eden), so the server throws an exception when
-        # either .hgsub or .hgsubstate is passed to hgGetDirstateTuple().
+        # have been tested with Eden), so don't bother to go to the server when
+        # either .hgsub or .hgsubstate is passed in.
         #
         # Because we know the Thrift call will fail, we throw the corresponding
         # KeyError in this case to avoid the overhead of the Thrift call as a
@@ -74,160 +130,38 @@ class eden_dirstate_map(collections.MutableMapping):
             raise KeyError(filename)
 
         try:
-            thrift_dirstate_tuple = self._thrift_client.hgGetDirstateTuple(
-                filename
-            )
+            # TODO: Consider fetching this from the commit context rather than
+            # querying Eden for this information.
+            manifest_entry = self._thrift_client.getManifestEntry(filename)
+            return [
+                'n', manifest_entry.mode, MERGE_STATE_NOT_APPLICABLE,
+                DUMMY_MTIME
+            ]
         except thrift.NoValueForKeyError as e:
             raise KeyError(e.key)
-
-        return thrift_dirstate_tuple_to_parsers_dirstatetuple(
-            thrift_dirstate_tuple
-        )
 
     def __setitem__(self, filename, dirstatetuple):
         # type(str, parsers.dirstatetuple) -> None
         status, mode, size, mtime = dirstatetuple
 
-        if size == -1:
-            merge_state = thrift.DirstateMergeState.BothParents
-        elif size == -2:
-            merge_state = thrift.DirstateMergeState.OtherParent
+        if size != MERGE_STATE_BOTH_PARENTS and size != MERGE_STATE_OTHER_PARENT:
+            merge_state = MERGE_STATE_NOT_APPLICABLE
         else:
-            merge_state = thrift.DirstateMergeState.NotApplicable
+            merge_state = size
 
-        if status == 'n':
-            file_status = thrift.DirstateNonnormalFileStatus.Normal
-        elif status == 'm':
-            file_status = thrift.DirstateNonnormalFileStatus.NeedsMerging
-        elif status == 'r':
-            file_status = thrift.DirstateNonnormalFileStatus.MarkedForRemoval
-        elif status == 'a':
-            file_status = thrift.DirstateNonnormalFileStatus.MarkedForAddition
-        elif status == '?':
-            file_status = thrift.DirstateNonnormalFileStatus.NotTracked
-        else:
-            raise Exception('Unrecognized status: %r' % status)
-
-        thrift_dirstate_tuple = thrift.DirstateTuple(file_status, mode, merge_state)
-        self._thrift_client.hgSetDirstateTuple(filename, thrift_dirstate_tuple)
-
-    def __delitem__(self, filename):
-        self._thrift_client.hgDeleteDirstateTuple(filename)
-
-    def __iter__(self):
-        raise Exception('Should not call __iter__ on eden_dirstate_map!')
-
-    def __len__(self):
-        raise Exception('Should not call __len__ on eden_dirstate_map!')
+        self._map[filename] = (status, mode, merge_state)
 
     def nonnormalentries(self):
         '''Returns a set of filenames.'''
-        # type() -> Set[str]
-        # It does not appear that we need to filter anything from this list.
-        return set(self._get_all_nonnormal_entries().keys())
+        # type() -> Tuple[Set[str], Set[str]]
+        nonnorm = set()
+        otherparent = set()
+        for path, entry in iteritems(self._map):
+            if entry[0] != 'n':
+                nonnorm.add(path)
+            elif entry[2] == MERGE_STATE_OTHER_PARENT:
+                otherparent.add(path)
+        return nonnorm, otherparent
 
-    def otherparententries(self):
-        '''Returns an iterable of (filename, parsers.dirstatetuple) pairs.'''
-        # Fetch the entries in the DirstateNonnormalFiles map
-        # where entry.status == DirstateNonnormalFileStatus.Normal and
-        # entry.mergeState == DirstateMergeState.OtherParent.
-        for k, v in self._get_all_nonnormal_entries().items():
-            if v[0] == 'n' and v[2] == -2:
-                yield k, v
-
-    def _get_all_nonnormal_entries(self):
-        # type() -> Dict[str, parsers.dirstatetuple]
-        entries = {}
-        for t in self._thrift_client.hgGetNonnormalFiles():
-            entries[t.relativePath
-                    ] = thrift_dirstate_tuple_to_parsers_dirstatetuple(t.tuple)
-        return entries
-
-    @property
-    def nonnormalset(self):
-        return self.nonnormalentries()
-
-    @property
-    def otherparentset(self):  # override
-        result = set()
-        for f, _s in self.otherparententries():
-            result.add(f)
-        return result
-
-
-def thrift_dirstate_tuple_to_parsers_dirstatetuple(thrift_dirstate_tuple):
-    return [
-        thrift_file_status_to_code(thrift_dirstate_tuple.status),
-        thrift_dirstate_tuple.mode,
-        thrift_merge_status_to_code(thrift_dirstate_tuple.mergeState),
-        0,  # fake mtime
-    ]
-
-
-def thrift_file_status_to_code(thrift_file_status):
-    tfs = thrift_file_status
-    if tfs == thrift.DirstateNonnormalFileStatus.Normal:
-        return 'n'
-    elif tfs == thrift.DirstateNonnormalFileStatus.NeedsMerging:
-        return 'm'
-    elif tfs == thrift.DirstateNonnormalFileStatus.MarkedForRemoval:
-        return 'r'
-    elif tfs == thrift.DirstateNonnormalFileStatus.MarkedForAddition:
-        return 'a'
-    elif tfs == thrift.DirstateNonnormalFileStatus.NotTracked:
-        return '?'
-    else:
-        raise Exception('Unrecognized status: %r' % thrift_file_status)
-
-
-def thrift_merge_status_to_code(thrift_merge_status):
-    tms = thrift_merge_status
-    if tms == thrift.DirstateMergeState.NotApplicable:
-        return 0
-    elif tms == thrift.DirstateMergeState.BothParents:
-        return -1
-    elif tms == thrift.DirstateMergeState.OtherParent:
-        return -2
-
-
-class eden_dirstate_copymap(collections.MutableMapping):
-    def __init__(self, thrift_client):
-        # type(eden_dirstate_copymap, EdenThriftClient) -> None
-        self._thrift_client = thrift_client
-
-    def _get_mapping_thrift(self):
-        # type(eden_dirstate_copymap) -> Dict[str, str]
-        return self._thrift_client.hgCopyMapGetAll()
-
-    def __getitem__(self, dest_filename):
-        # type(str) -> str
-        try:
-            return self._thrift_client.hgCopyMapGet(dest_filename)
-        except thrift.NoValueForKeyError as e:
-            raise KeyError(e.key)
-
-    def __setitem__(self, dest_filename, source_filename):
-        self._thrift_client.hgCopyMapPut(dest_filename, source_filename)
-
-    def __delitem__(self, dest_filename):
-        # TODO(mbolin): Setting the value to '' deletes it from the map. This
-        # would be better as an explicit "remove" API.
-        self._thrift_client.hgCopyMapPut(dest_filename, '')
-
-    def __iter__(self):
-        return iter(self._get_mapping_thrift())
-
-    def __len__(self):
-        raise Exception('Should not call __len__ on eden_dirstate_copymap!')
-
-    def keys(self):
-        # collections.MutableMapping implements keys(), but does so poorly--
-        # it ends up calling __iter__() and then __len__(), and we want to
-        # avoid making two separate thrift calls.
-        return self._get_mapping_thrift().keys()
-
-    def copy(self):
-        # We return a new dict object, and not eden_dirstate_copymap() object.
-        # Any mutations made to the returned copy should not affect the actual
-        # dirstate, and should not be sent back to eden via thrift.
-        return self._get_mapping_thrift().copy()
+    def create_clone_of_internal_map(self):
+        return dict(self._map)

@@ -11,6 +11,7 @@ Mercurial extension for supporting eden client checkouts.
 This overrides the dirstate to check with the eden daemon for modifications,
 instead of doing a normal scan of the filesystem.
 """
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -21,6 +22,7 @@ import sys
 from mercurial import node
 from mercurial import demandimport
 
+import eden.dirstate
 
 if sys.version_info < (2, 7, 6):
     # 2.7.6 was the first version to allow unicode format strings in
@@ -61,21 +63,13 @@ sys.path.insert(0, archive_root)
 with demandimport.deactivated():
     import eden.thrift as eden_thrift_module
     import facebook.eden.ttypes as eden_ttypes
-    import facebook.hgdirstate.ttypes as hg_ttypes
 
 create_thrift_client = eden_thrift_module.create_thrift_client
-StatusCode = eden_ttypes.StatusCode
+ScmFileStatus = eden_ttypes.ScmFileStatus
 ConflictType = eden_ttypes.ConflictType
 FileInformationOrError = eden_ttypes.FileInformationOrError
-HgNonnormalFile = eden_ttypes.HgNonnormalFile
+ManifestEntry = eden_ttypes.ManifestEntry
 NoValueForKeyError = eden_ttypes.NoValueForKeyError
-
-DirstateCopymap = hg_ttypes.DirstateCopymap
-DirstateMergeState = hg_ttypes.DirstateMergeState
-DirstateNonnormalFileStatus = hg_ttypes.DirstateNonnormalFileStatus
-DirstateNonnormalFile = hg_ttypes.DirstateNonnormalFile
-DirstateNonnormalFiles = hg_ttypes.DirstateNonnormalFiles
-DirstateTuple = hg_ttypes.DirstateTuple
 
 
 class ClientStatus(object):
@@ -89,16 +83,19 @@ class ClientStatus(object):
         self.clean = []
 
     def __repr__(self):
-        return ('ClientStatus(modified={modified}; added={added}; '
-                'removed={removed}; deleted={deleted}; unknown={unknown}; '
-                'ignored={ignored}; clean={clean}').format(
+        return (
+            'ClientStatus(modified={modified}; added={added}; '
+            'removed={removed}; deleted={deleted}; unknown={unknown}; '
+            'ignored={ignored}; clean={clean}'
+        ).format(
             modified=self.modified,
             added=self.added,
             removed=self.removed,
             deleted=self.deleted,
             unknown=self.unknown,
             ignored=self.ignored,
-            clean=self.clean)
+            clean=self.clean
+        )
 
 
 class EdenThriftClient(object):
@@ -115,6 +112,10 @@ class EdenThriftClient(object):
         is a reasonable compromise.
         '''
         return create_thrift_client(mounted_path=self._root)
+
+    def getManifestEntry(self, relativePath):
+        with self._get_client() as client:
+            return client.getManifestEntry(self._root, relativePath)
 
     def getParentCommits(self):
         '''
@@ -139,28 +140,83 @@ class EdenThriftClient(object):
         with self._get_client() as client:
             client.resetParentCommits(self._root, parents)
 
-    def getStatus(self, list_ignored):
+    def getStatus(self, list_ignored, dirstate_map, ui):  # noqa: C901
+        # type(bool, eden_dirstate_map, ui) -> ClientStatus
         status = ClientStatus()
         with self._get_client() as client:
-            thrift_hg_status = client.scmGetStatus(self._root, list_ignored)
+            thrift_hg_status = client.getScmStatus(self._root, list_ignored)
+
+        # The Eden getStatus() Thrift call is not SCM-aware. We must incorporate
+        # the information in our eden_dirstate_map to determine the overall
+        # status.
+
+        dirstates = dirstate_map.create_clone_of_internal_map()
 
         for path, code in thrift_hg_status.entries.iteritems():
-            if code == StatusCode.MODIFIED:
-                status.modified.append(path)
-            elif code == StatusCode.ADDED:
-                status.added.append(path)
-            elif code == StatusCode.REMOVED:
-                status.removed.append(path)
-            elif code == StatusCode.MISSING:
-                status.deleted.append(path)
-            elif code == StatusCode.NOT_TRACKED:
-                status.unknown.append(path)
-            elif code == StatusCode.IGNORED:
-                status.ignored.append(path)
-            elif code == StatusCode.CLEAN:
-                status.clean.append(path)
+            if code == ScmFileStatus.MODIFIED:
+                # It is possible that the user can mark a file for removal, but
+                # then modify it. If it is marked for removal, it should be
+                # reported as such by `hg status` even though it is still on
+                # disk.
+                dirstate = dirstates.pop(path, None)
+                if dirstate and dirstate[0] == 'r':
+                    status.removed.append(path)
+                else:
+                    status.modified.append(path)
+            elif code == ScmFileStatus.REMOVED:
+                # If the file no longer exits, we must check to see whether the
+                # user explicitly marked it for removal.
+                dirstate = dirstates.pop(path, None)
+                if dirstate and dirstate[0] == 'r':
+                    status.removed.append(path)
+                else:
+                    status.deleted.append(path)
+            elif code == ScmFileStatus.ADDED:
+                dirstate = dirstates.pop(path, None)
+                if dirstate:
+                    state = dirstate[0]
+                    if state == 'a' or (
+                        state == 'n' and
+                        dirstate[2] == eden.dirstate.MERGE_STATE_OTHER_PARENT
+                    ):
+                        status.added.append(path)
+                    else:
+                        status.unknown.append(path)
+                else:
+                    status.unknown.append(path)
+            elif code == ScmFileStatus.IGNORED:
+                # Although Eden may think the file should be ignored as per
+                # .gitignore, it is possible the user has overridden that
+                # default behavior by marking it for addition.
+                dirstate = dirstates.pop(path, None)
+                if dirstate and dirstate[0] == 'a':
+                    status.added.append(path)
+                else:
+                    status.ignored.append(path)
             else:
                 raise Exception('Unexpected status code: %s' % code)
+
+        for path, entry in dirstates.iteritems():
+            state = entry[0]
+            if state == 'm':
+                if entry[2] == 0:
+                    ui.warn(
+                        'Unexpected Nonnormal file ' + path + ' has a '
+                        'merge state of NotApplicable while its has been '
+                        'marked as "needs merging".'
+                    )
+                else:
+                    status.modified.append(path)
+            elif state == 'a':
+                # TODO(mbolin): If `list_ignored` is `False`, we must verify
+                # that `path` is on disk before reporting it as added. If it is
+                # not on disk, then it should be reported as missing. This could
+                # happen if the user has done an `hg add` to override an
+                # `.hgignore` and then deleted the file.
+                status.deleted.append(path)
+            elif state == 'r':
+                status.removed.append(path)
+
         return status
 
     def checkout(self, node, force):
@@ -174,49 +230,3 @@ class EdenThriftClient(object):
     def getFileInformation(self, files):
         with self._get_client() as client:
             return client.getFileInformation(self._root, files)
-
-    def hgBackupDirstate(self, backupname):
-        with self._get_client() as client:
-            client.hgBackupDirstate(self._root, backupname)
-
-    def hgRestoreDirstateFromBackup(self, backupname):
-        with self._get_client() as client:
-            client.hgRestoreDirstateFromBackup(self._root, backupname)
-
-    def hgClearDirstate(self):
-        with self._get_client() as client:
-            client.hgClearDirstate(self._root)
-
-    def hgGetDirstateTuple(self, relativePath):
-        with self._get_client() as client:
-            return client.hgGetDirstateTuple(self._root, relativePath)
-
-    def hgSetDirstateTuple(self, relativePath, dirstateTuple):
-        with self._get_client() as client:
-            return client.hgSetDirstateTuple(self._root, relativePath,
-                                               dirstateTuple)
-
-    def hgDeleteDirstateTuple(self, relativePath):
-        with self._get_client() as client:
-            return client.hgDeleteDirstateTuple(self._root, relativePath)
-
-    def hgGetNonnormalFiles(self):
-        # type() -> List[HgNonnormalFile]
-        with self._get_client() as client:
-            return client.hgGetNonnormalFiles(self._root)
-
-    def hgCopyMapPut(self, relativePathDest, relativePathSource):
-        # type(str, str) -> None
-        with self._get_client() as client:
-            return client.hgCopyMapPut(self._root, relativePathDest,
-                                         relativePathSource)
-
-    def hgCopyMapGet(self, relativePathDest):
-        # type(str) -> str
-        with self._get_client() as client:
-            return client.hgCopyMapGet(self._root, relativePathDest)
-
-    def hgCopyMapGetAll(self):
-        # type(str) -> Dict[str, str]
-        with self._get_client() as client:
-            return client.hgCopyMapGetAll(self._root)

@@ -9,27 +9,15 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from mercurial import dirstate, node, policy, scmutil, util
-try:
-    # Check to see if this mercurial version has the sparse module.
-    from mercurial import sparse as sparsemod
-    # Unfortunately due to the demandimport module, the import above will
-    # succeed even on older versions of mercurial that do not actually contain
-    # sparse.  Access a member of the module to force it to be loaded.
-    sparsemod.__name__
-except ImportError:
-    # Older versions of mercurial do not have sparse
-    sparsemod = None
-
+from mercurial import dirstate, policy, scmutil, sparse as sparsemod, util
 from . import EdenThriftClient as thrift
 from . import eden_dirstate_map as eden_dirstate_map
-import binascii
 import errno
 import stat
 import os
 
 parsers = policy.importmod('parsers')
-
+propertycache = util.propertycache
 dirstatetuple = parsers.dirstatetuple
 
 
@@ -46,26 +34,19 @@ class statobject(object):
 class eden_dirstate(dirstate.dirstate):
     def __init__(self, repo, ui, root):
         self.eden_client = thrift.EdenThriftClient(repo)
-        self._eden_map_impl = eden_dirstate_map.eden_dirstate_map(
-            self.eden_client,
-            repo
-        )
+        self._repo = repo
 
         # We should override any logic in dirstate that uses self._validate.
-        validate = None
+        validate = repo._dirstatevalidate
 
         opener = repo.vfs
+
         # Newer versions of mercurial require a sparsematchfn argument to the
         # dirstate.
-        if sparsemod is not None:
-            def sparsematchfn():
-                return sparsemod.matcher(repo)
-            super(eden_dirstate, self).__init__(opener, ui, root, validate,
-                                                sparsematchfn)
-        else:
-            super(eden_dirstate, self).__init__(opener, ui, root, validate)
-
-        self._repo = repo
+        def sparsematchfn():
+            return sparsemod.matcher(repo)
+        super(eden_dirstate, self).__init__(opener, ui, root, validate,
+                                            sparsematchfn)
 
     def __iter__(self):
         # FIXME: This appears to be called by `hg reset`, so we provide a dummy
@@ -75,12 +56,14 @@ class eden_dirstate(dirstate.dirstate):
             yield None
         return
 
-    @property
+    @propertycache
     def _map(self):  # override
-        return self._eden_map_impl
-
-    def _read(self):  # override
-        pass
+        '''We override this to use eden_dirstate_map instead of Mercurial's
+        dirstatemap.'''
+        self._map = eden_dirstate_map.eden_dirstate_map(
+            self._ui, self._opener, self._root, self.eden_client, self._repo
+        )
+        return self._map
 
     def iteritems(self):  # override
         # This seems like the type of O(repo) operation that should not be
@@ -90,91 +73,6 @@ class eden_dirstate(dirstate.dirstate):
 
     def dirs(self):  # override
         raise NotImplementedError('eden_dirstate.dirs()')
-
-    def parents(self):  # override
-        return self._map.parents()
-
-    def p1(self):  # override
-        return self._map.parents()[0]
-
-    def p2(self):  # override
-        return self._map.parents()[1]
-
-    def __setattr__(self, key, value):
-        if key == '_pl':
-            # self.rebuild() ends up calling this instead of self.setparents().
-            # We should fix this upstream, but for now, we hack around this.
-            # This is what sqldirstate does.
-            p1 = value[0]
-            p2 = value[1]
-            self.setparents(p1, p2)
-            self.__dict__['_p1'] = value
-        else:
-            return super(eden_dirstate, self).__setattr__(key, value)
-
-    def setparents(self, p1, p2=node.nullid):  # override
-        '''Set dirstate parents to p1 and p2.
-
-        When moving from two parents to one, 'm' merged entries a
-        adjusted to normal and previous copy records discarded and
-        returned by the call.
-
-        See localrepo.setparents()
-        '''
-        if self._parentwriters == 0:
-            raise ValueError(
-                'cannot set dirstate parent without '
-                'calling dirstate.beginparentchange'
-            )
-        oldp2 = self._map.parents()[1]
-
-        # Normalize p1 and p2 to hashes in case either is passed in as a
-        # revision number.
-        if type(p1) is int:
-            p1_node = self._repo.lookup(p1)
-        else:
-            p1_node = p1
-        if type(p2) is int:
-            p2_node = self._repo.lookup(p2)
-        else:
-            p2_node = p2
-
-        self._map.setparents(p1_node, p2_node)
-
-        copies = {}
-        if oldp2 != node.nullid and p2_node == node.nullid:
-            candidatefiles = self._map.nonnormalset.union(
-                self._map.otherparentset)
-            for f in candidatefiles:
-                s = self._map.get(f)
-                if s is None:
-                    continue
-
-                # Discard 'm' markers when moving away from a merge state
-                if s[0] == 'm':
-                    source = self._map.copymap.get(f)
-                    if source:
-                        copies[f] = source
-                    self.normallookup(f)
-                # Also fix up otherparent markers
-                elif s[0] == 'n' and s[2] == -2:
-                    source = self._map.copymap.get(f)
-                    if source:
-                        copies[f] = source
-                    self.add(f)
-        return copies
-
-    def invalidate(self):  # override
-        super(eden_dirstate, self).invalidate()
-        self._eden_map_impl.invalidate()
-
-    def clear(self):  # override
-        '''Intended to match superclass implementation except for changes to
-        map_ and copymap_.'''
-        self.eden_client.hgClearDirstate()
-        self._pl = [node.nullid, node.nullid]
-        self._lastnormaltime = 0
-        self._updatedfiles.clear()
 
     def walk(self, match, subrepos, unknown, ignored, full=True):  # override
         '''
@@ -261,7 +159,7 @@ class eden_dirstate(dirstate.dirstate):
             # !ignored -> exclude any ignored files.
             # To get ignored files in the status list, we need to pass
             # True when !ignored is passed in to us.
-            status = self.eden_client.getStatus(not ignored)
+            status = self._getStatus(not ignored)
             elide = set()
             if not unknown:
                 elide.update(status.unknown)
@@ -279,7 +177,7 @@ class eden_dirstate(dirstate.dirstate):
         # We should never have any files we are unsure about
         unsure = []
 
-        edenstatus = self.eden_client.getStatus(ignored)
+        edenstatus = self._getStatus(ignored)
 
         if clean:
             # By default, Eden's getStatus() will not return "clean" files.
@@ -318,107 +216,31 @@ class eden_dirstate(dirstate.dirstate):
 
         return (unsure, status)
 
+    def _getStatus(self, list_ignored):
+        return self.eden_client.getStatus(list_ignored, self._map, self._ui)
+
     def matches(self, match):  # override
         return self._eden_walk_helper(
             match, deleted=False, unknown=False, ignored=False
         )
 
-    def _droppath(self, f):  # override
-        # This is a copy/paste of dirstate._droppath, but with the references to
-        # self._dirs and self._filefoldmap removed.
-        self._updatedfiles.add(f)
-
     def _addpath(self, f, state, mode, size, mtime):  # override
         # This is a copy/paste of dirstate._addpath, but with the references to
-        # self._dirs removed.
+        # self._dirs removed. We can probably eliminate this override once
+        # the reference to dirs is guarded with:
+        #
+        #     if "dirs" in self._map.__dict__`
+        #
+        # as it is in other methods in dirstate. I put
+        # https://phab.mercurial-scm.org/D1313 out for review to fix this.
         oldstate = self[f]
         if state == 'a' or oldstate == 'r':
             scmutil.checkfilename(f)
 
+        self._dirty = True
         self._updatedfiles.add(f)
         self._map[f] = dirstatetuple(state, mode, size, mtime)
-
-    def write(self, tr):  # override
-        # type(eden_dirstate, Optional[transaction]) -> None
-        '''This writes the .hg/dirstate file or schedules it to be written when
-        the transaction closes. In general, we do not care about the existence
-        or contents of this file, but Nuclide uses changes to this file as a
-        proxy for whether Hg's state has changed such that is should invalidate
-        its caches for Hg data. Once we have a better mechanism for broadcasting
-        changes and update Nuclide to use it, we may want to make this method a
-        no-op.
-
-        Note: This appears to be called from localrepo.'''
-        filename = self._filename
-        if tr:
-            # emulate that all 'dirstate.normal' results are written out
-            self._lastnormaltime = 0
-            self._updatedfiles.clear()
-
-            # delay writing in-memory changes out
-            tr.addfilegenerator('dirstate', (self._filename,),
-                                self._eden_writedirstate, location='plain')
-            return
-
-        st = self._opener(filename, 'w', atomictemp=True, checkambig=True)
-        self._eden_writedirstate(st)
-
-    def _eden_writedirstate(self, st):
-        # We preserve the parents at the start of the dirstate for compatibility
-        # with some other tools (such as our scm-prompt and hg whereami
-        # wrappers) that peek at them as a quick way to find out the current
-        # commit. Aside from that, the contents that we write do not matter, so
-        # we might as well write out something that is useful for debugging.
-        st.write(''.join(self.parents()))
-        st.write('\n#edendirstate')
-        st.write('\nThis is a fake dirstate put here by eden_dirstate.\n')
-        st.write(' '.join(map(binascii.hexlify, self.parents())) + '\n')
-        st.close()
-
-    def _writedirstate(self, st):  # override
-        raise NotImplementedError(
-            'No one should try to invoke _writedirstate() in eden_dirstate.')
-
-    def savebackup(self, tr, backupname):  # override
-        '''Save current dirstate into backup file'''
-        backup_file = self._opener(backupname, 'w', atomictemp=True)
-        # TODO(mbolin): Notify _plchangecallbacks in setparents() even though
-        # dirstate.py does it in this method.
-        parents = self.parents()
-        backup_file.write(parents[0] + parents[1])
-        backup_file.close()
-        self.eden_client.hgBackupDirstate(backupname)
-
-        if tr:
-            # ensure that pending file written above is unlinked at
-            # failure, even if tr.writepending isn't invoked until the
-            # end of this transaction
-            tr.registertmp(backupname, location='plain')
-
-    def restorebackup(self, tr, backupname):  # override
-        '''
-        Args:
-            tr (transaction?): such as `repo.currenttransaction()` or None.
-            backupname (str): Filename to pass to opener for reading data.
-        '''
-        # this "invalidate()" prevents "wlock.release()" from writing
-        # changes of dirstate out after restoring from backup file
-        self.invalidate()
-
-        backup_data = self._opener.read(backupname).strip()
-        p1 = node.nullid
-        p2 = node.nullid
-        if backup_data is not None:
-            assert len(backup_data) == 40
-            p1 = backup_data[0:20]
-            p2 = backup_data[20:40]
-
-        with self.parentchange():
-            self.setparents(p1, p2)
-            self.eden_client.hgRestoreDirstateFromBackup(backupname)
-
-        self._opener.tryunlink(backupname)
-
-    def _opendirstatefile(self):  # override
-        raise NotImplementedError(
-            'No one should try to invoke _opendirstatefile() in eden_dirstate.')
+        if state != 'n' or mtime == -1:
+            self._map.nonnormalset.add(f)
+        if size == -2:
+            self._map.otherparentset.add(f)
