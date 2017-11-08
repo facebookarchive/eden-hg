@@ -16,6 +16,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
 import sys
 
 from mercurial import node
@@ -200,12 +201,10 @@ class EdenThriftClient(object):
                 else:
                     status.modified.append(path)
             elif state == 'a':
-                # TODO(mbolin): If `list_ignored` is `False`, we must verify
-                # that `path` is on disk before reporting it as added. If it is
-                # not on disk, then it should be reported as missing. This could
-                # happen if the user has done an `hg add` to override an
-                # `.hgignore` and then deleted the file.
-                status.deleted.append(path)
+                if os.path.isfile(os.path.join(self._root, path)):
+                    status.added.append(path)
+                else:
+                    status.deleted.append(path)
             elif state == 'r':
                 status.removed.append(path)
 

@@ -329,6 +329,24 @@ class EdenMatchInfo(object):
                 'match pattern %r is not supported by Eden' % (kind, pat, raw))
         return globs
 
+    def get_explicitly_matched_files(self):
+        '''Returns a set of files (as paths relative to the repo root) that
+        are identified by 'path' or 'relpath' includes. This should be the set
+        of files that the user has enumerated explicitly (as opposed to
+        implicitly via a directory/glob) in creating the matcher associated with
+        this EdenMatchInfo.
+
+        Note that each returned path will correspond to an *existing* file. If
+        the 'path' or 'relpath' identifies either a directory or a non-existent
+        file, then it will not be included in the set.
+        '''
+        files = set()
+        for kind, pat, raw in self._includes:
+            if (kind in ('relpath', 'path') and
+                    os.path.isfile(os.path.join(self._root, pat))):
+                files.add(pat)
+        return files
+
     def __str__(self):
         return str(self.make_glob_list())
 

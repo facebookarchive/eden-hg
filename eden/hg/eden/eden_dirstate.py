@@ -84,11 +84,11 @@ class eden_dirstate(dirstate.dirstate):
         Return a dict mapping filename to stat-like object
         '''
         if unknown and not ignored and not full:
+            # We assume that this is being called from `hg add`, so we return
+            # everything that is eligible for addition and filtered by the
+            # matcher.
             # TODO(mbolin): Instead of assuming `hg add`, do something robust.
             # pre-add/post-add hooks might be appropriate.
-            # We assume that this is being called from `hg add`, so we return
-            # everything that is eligible for addition and filter by the
-            # matcher.
             clean = False
             status = self.status(match, subrepos, ignored, clean, unknown)[1]
             modified, added, removed, deleted, unknown, ignored, clean = status
@@ -110,6 +110,28 @@ class eden_dirstate(dirstate.dirstate):
                         raise
 
             matched_files = [f for f in candidates if match(f)]
+
+            # Finally, we have to account for the case where the user has
+            # explicitly tried to add an ignored file. We don't want to
+            # request ignored files when we call status() because the result set
+            # could be extremely large. Instead, we ask the matcher if any of
+            # its patterns are for a specific file, and if so, we add such files
+            # as potential candidates for addition.
+            #
+            # Note that users can explicitly add ignored *files*, but they
+            # cannot explicitly add ignored *directories* (each file in the
+            # directory would have to be added individually).
+            if not util.safehasattr(match, '_eden_match_info'):
+                raise NotImplementedError(
+                    'match object is not eden compatible'
+                    '(_eden_match_info is missing)'
+                )
+            info = match._eden_match_info
+            files = info.get_explicitly_matched_files()
+            if files:
+                matched_files_set = set(matched_files)
+                matched_files_set.update(files)
+                matched_files = list(matched_files_set)
         else:
             matched_files = self._eden_walk_helper(
                 match, deleted=True, unknown=unknown, ignored=ignored
