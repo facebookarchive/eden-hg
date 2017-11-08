@@ -143,7 +143,7 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
         # The updated and removed file counts will always be 0 in our case.
         if conflicts and not force:
             stats = _handleupdateconflicts(repo, wctx, p1ctx, destctx, labels,
-                                           conflicts)
+                                           conflicts, force)
         else:
             stats = 0, 0, 0, 0
 
@@ -172,7 +172,7 @@ def update_showstats(orig, repo, stats, quietempty=False):
         repo.ui.status(_('update complete\n'))
 
 
-def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts):
+def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
     # When resolving conflicts during an update operation, the working
     # directory (wctx) is one side of the merge, the destination commit (dest)
     # is the other side of the merge, and the source commit (src) is treated as
@@ -196,7 +196,7 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts):
         'dm',
         'e',
         'f',
-        'g',
+        'g',  # create or modify
         'k',
         'm',
         'p',  # path conflicts
@@ -221,8 +221,21 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts):
             action = (conflict.path, None, conflict.path, False, src.node())
             prompt = "prompt changed/deleted"
         elif conflict.type == ConflictType.UNTRACKED_ADDED:
-            action_type = 'c'
-            action = (dest.manifest().flags(conflict.path),)
+            # In the normal flow of merge.py, the initial action for this file
+            # would be 'c' in the actions returned by manifestmerge(), but then
+            # it would get replaced with 'g' when the actions are treated by
+            # _checkunknownfiles(), so we must reflect the net result to
+            # maintain parity with Mercurial.
+            #
+            # Although in the implementation of _checkunknownfiles(), the logic
+            # to decide whether a backup should be made is slightly more complex
+            # than `not force`, this seems close enough.
+            backup = not force
+            action_type = 'g'
+            action = (
+                dest.manifest().flags(conflict.path),
+                backup
+            )
             prompt = "remote created"
         elif conflict.type == ConflictType.REMOVED_MODIFIED:
             action_type = 'dc'
