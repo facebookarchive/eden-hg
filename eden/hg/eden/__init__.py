@@ -251,6 +251,11 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
             action = (conflict.path, conflict.path, conflict.path,
                       False, src.node())
             prompt = "versions differ"
+        elif conflict.type == ConflictType.DIRECTORY_NOT_EMPTY:
+            # This is a file in a directory that Eden would have normally
+            # removed as part of the checkout, but it could not because this
+            # untracked file was here. Just leave it be.
+            continue
         else:
             raise Exception('unknown conflict type received from eden: '
                             '%r, %r, %r' % (conflict.type, conflict.path,
