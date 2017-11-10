@@ -142,14 +142,16 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
         #   (updated, merged, removed, unresolved)
         # The updated and removed file counts will always be 0 in our case.
         if conflicts and not force:
-            stats = _handleupdateconflicts(repo, wctx, p1ctx, destctx, labels,
-                                           conflicts, force)
+            stats, actions = _handleupdateconflicts(repo, wctx, p1ctx, destctx, labels,
+                                                    conflicts, force)
         else:
             stats = 0, 0, 0, 0
+            actions = {}
 
         with repo.dirstate.parentchange():
             # TODO(mbolin): Set the second parent, if appropriate.
             repo.setparents(destctx.node())
+            mergemod.recordupdates(repo, actions, branchmerge)
 
             # Clear the update state
             util.unlink(repo.vfs.join('updatestate'))
@@ -264,12 +266,13 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
         actions[action_type].append((conflict.path, action, prompt))
 
     # Call applyupdates
+    # Note that applyupdates may mutate actions.
     stats = mergemod.applyupdates(repo, actions, wctx, dest,
                                   overwrite=False, labels=labels)
 
     # Add the error count to the number of unresolved files.
     # This ensures we exit unsuccessfully if there were any errors
-    return (stats[0], stats[1], stats[2], stats[3] + numerrors)
+    return (stats[0], stats[1], stats[2], stats[3] + numerrors), actions
 
 
 def reposetup(ui, repo):
