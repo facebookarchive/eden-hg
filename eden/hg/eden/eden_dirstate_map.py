@@ -140,16 +140,21 @@ class eden_dirstate_map(dirstate.dirstatemap):
         except thrift.NoValueForKeyError as e:
             raise KeyError(e.key)
 
-    def __setitem__(self, filename, dirstatetuple):
-        # type(str, parsers.dirstatetuple) -> None
-        status, mode, size, mtime = dirstatetuple
+    def hastrackeddir(self, d):  # override
+        # TODO(mbolin): Unclear whether it is safe to hardcode this to False.
+        return False
 
+    def hasdir(self, d):  # override
+        # TODO(mbolin): Unclear whether it is safe to hardcode this to False.
+        return False
+
+    def _insert_tuple(self, filename, state, mode, size, mtime):  # override
         if size != MERGE_STATE_BOTH_PARENTS and size != MERGE_STATE_OTHER_PARENT:
             merge_state = MERGE_STATE_NOT_APPLICABLE
         else:
             merge_state = size
 
-        self._map[filename] = (status, mode, merge_state)
+        self._map[filename] = (state, mode, merge_state)
 
     def nonnormalentries(self):
         '''Returns a set of filenames.'''

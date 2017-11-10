@@ -18,7 +18,6 @@ import os
 
 parsers = policy.importmod('parsers')
 propertycache = util.propertycache
-dirstatetuple = parsers.dirstatetuple
 
 
 class statobject(object):
@@ -34,7 +33,6 @@ class statobject(object):
 class eden_dirstate(dirstate.dirstate):
     def __init__(self, repo, ui, root):
         self.eden_client = thrift.EdenThriftClient(repo)
-        self._repo = repo
 
         # We should override any logic in dirstate that uses self._validate.
         validate = repo._dirstatevalidate
@@ -48,6 +46,12 @@ class eden_dirstate(dirstate.dirstate):
         super(eden_dirstate, self).__init__(opener, ui, root, validate,
                                             sparsematchfn)
 
+        def create_eden_dirstate(ui, opener, root):
+            return eden_dirstate_map.eden_dirstate_map(
+                ui, opener, root, self.eden_client, repo
+            )
+        self._mapcls = create_eden_dirstate
+
     def __iter__(self):
         # FIXME: This appears to be called by `hg reset`, so we provide a dummy
         # response here, but really, we should outright prohibit this.
@@ -55,15 +59,6 @@ class eden_dirstate(dirstate.dirstate):
         if False:
             yield None
         return
-
-    @propertycache
-    def _map(self):  # override
-        '''We override this to use eden_dirstate_map instead of Mercurial's
-        dirstatemap.'''
-        self._map = eden_dirstate_map.eden_dirstate_map(
-            self._ui, self._opener, self._root, self.eden_client, self._repo
-        )
-        return self._map
 
     def iteritems(self):  # override
         # This seems like the type of O(repo) operation that should not be
@@ -245,24 +240,3 @@ class eden_dirstate(dirstate.dirstate):
         return self._eden_walk_helper(
             match, deleted=False, unknown=False, ignored=False
         )
-
-    def _addpath(self, f, state, mode, size, mtime):  # override
-        # This is a copy/paste of dirstate._addpath, but with the references to
-        # self._dirs removed. We can probably eliminate this override once
-        # the reference to dirs is guarded with:
-        #
-        #     if "dirs" in self._map.__dict__`
-        #
-        # as it is in other methods in dirstate. I put
-        # https://phab.mercurial-scm.org/D1313 out for review to fix this.
-        oldstate = self[f]
-        if state == 'a' or oldstate == 'r':
-            scmutil.checkfilename(f)
-
-        self._dirty = True
-        self._updatedfiles.add(f)
-        self._map[f] = dirstatetuple(state, mode, size, mtime)
-        if state != 'n' or mtime == -1:
-            self._map.nonnormalset.add(f)
-        if size == -2:
-            self._map.otherparentset.add(f)
