@@ -252,3 +252,13 @@ class eden_dirstate(dirstate.dirstate):
         return self._eden_walk_helper(
             match, deleted=False, unknown=False, ignored=False
         )
+
+    def rebuild(self, parent, allfiles, changedfiles=None):
+        # Ignore the input allfiles parameter, and always rebuild with
+        # an empty allfiles list.
+        #
+        # edenfs itself will track the file changes correctly.
+        # We only track merge state and added/removed status in the python
+        # dirstate code.
+        super(eden_dirstate, self).rebuild(parent, allfiles=[],
+                                           changedfiles=changedfiles)
