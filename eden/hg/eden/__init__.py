@@ -179,6 +179,12 @@ def merge_update(
             actions = {}
 
         with repo.dirstate.parentchange():
+            if force:
+                # If the user has done an `update --clean`, then we should
+                # remove all entries from the dirstate. Note this call to
+                # clear() will also remove the parents, but we set them on the
+                # next line, so we'll be OK.
+                repo.dirstate.clear()
             # TODO(mbolin): Set the second parent, if appropriate.
             repo.setparents(destctx.node())
             mergemod.recordupdates(repo, actions, branchmerge)
