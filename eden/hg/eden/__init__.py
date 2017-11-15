@@ -25,9 +25,7 @@ import sys
 archive_root = os.path.normpath(os.path.join(__file__, '../../..'))
 sys.path.insert(0, archive_root)
 
-from mercurial import (
-    error, extensions, hg, localrepo, util
-)
+from mercurial import (error, extensions, hg, localrepo, util)
 from mercurial import merge as mergemod
 from mercurial.i18n import _
 from mercurial import match as matchmod
@@ -43,8 +41,9 @@ def extsetup(ui):
     orig = localrepo.localrepository.dirstate
     # For some reason, localrepository.invalidatedirstate() does not call
     # dirstate.invalidate() by default, so we must wrap it.
-    extensions.wrapfunction(localrepo.localrepository, 'invalidatedirstate',
-                            invalidatedirstate)
+    extensions.wrapfunction(
+        localrepo.localrepository, 'invalidatedirstate', invalidatedirstate
+    )
     extensions.wrapfunction(mergemod, 'update', merge_update)
     extensions.wrapfunction(hg, '_showstats', update_showstats)
     extensions.wrapfunction(orig, 'func', wrapdirstate)
@@ -67,9 +66,19 @@ def invalidatedirstate(orig, self):
 # This function replaces the update() function in mercurial's mercurial.merge
 # module.   It's signature must match the original mercurial.merge.update()
 # function.
-def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
-                 mergeancestor=False, labels=None, matcher=None,
-                 mergeforce=False, updatecheck=None):
+def merge_update(
+    orig,
+    repo,
+    node,
+    branchmerge,
+    force,
+    ancestor=None,
+    mergeancestor=False,
+    labels=None,
+    matcher=None,
+    mergeforce=False,
+    updatecheck=None
+):
     '''Apparently node can be a 20-byte hash or an integer referencing a
     revision number.
     '''
@@ -78,7 +87,10 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
     if not util.safehasattr(repo.dirstate, 'eden_client'):
         why_not_eden = 'This is not an eden repository.'
     if matcher is not None and not matcher.always():
-        why_not_eden = 'We don\'t support doing a partial update through eden yet.'
+        why_not_eden = (
+            'We don\'t support doing a partial update through '
+            'eden yet.'
+        )
     elif branchmerge:
         why_not_eden = 'branchmerge is "truthy:" %s.' % branchmerge
     elif ancestor is not None:
@@ -90,10 +102,20 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
         why_not_eden = None
 
     if why_not_eden:
-        repo.ui.debug('falling back to non-eden update code path: %s\n' % why_not_eden)
-        return orig(repo, node, branchmerge, force, ancestor=ancestor,
-                    mergeancestor=mergeancestor, labels=labels, matcher=matcher,
-                    mergeforce=mergeforce)
+        repo.ui.debug(
+            'falling back to non-eden update code path: %s\n' % why_not_eden
+        )
+        return orig(
+            repo,
+            node,
+            branchmerge,
+            force,
+            ancestor=ancestor,
+            mergeancestor=mergeancestor,
+            labels=labels,
+            matcher=matcher,
+            mergeforce=mergeforce
+        )
     else:
         repo.ui.debug('using eden update code path\n')
 
@@ -133,7 +155,8 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
                 tr.writepending()
 
             conflicts = repo.dirstate.eden_client.checkout(
-                destctx.node(), force=force)
+                destctx.node(), force=force
+            )
         else:
             conflicts = None
 
@@ -142,8 +165,9 @@ def merge_update(orig, repo, node, branchmerge, force, ancestor=None,
         #   (updated, merged, removed, unresolved)
         # The updated and removed file counts will always be 0 in our case.
         if conflicts and not force:
-            stats, actions = _handleupdateconflicts(repo, wctx, p1ctx, destctx, labels,
-                                                    conflicts, force)
+            stats, actions = _handleupdateconflicts(
+                repo, wctx, p1ctx, destctx, labels, conflicts, force
+            )
         else:
             stats = 0, 0, 0, 0
             actions = {}
@@ -168,8 +192,9 @@ def update_showstats(orig, repo, stats, quietempty=False):
     # directory does not need to be accessed or traversed on update operations.
     (updated, merged, removed, unresolved) = stats
     if merged or unresolved:
-        repo.ui.status(_('%d files merged, %d files unresolved\n') %
-                       (merged, unresolved))
+        repo.ui.status(
+            _('%d files merged, %d files unresolved\n') % (merged, unresolved)
+        )
     elif not quietempty:
         repo.ui.status(_('update complete\n'))
 
@@ -189,22 +214,25 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
     # desired behavior.
 
     # Build a list of actions to pass to mergemod.applyupdates()
-    actions = dict((m, []) for m in [
-        'a',
-        'am',
-        'cd',
-        'dc',
-        'dg',
-        'dm',
-        'e',
-        'f',
-        'g',  # create or modify
-        'k',
-        'm',
-        'p',  # path conflicts
-        'pr',  # files to rename
-        'r',
-    ])
+    actions = dict(
+        (m, [])
+        for m in [
+            'a',
+            'am',
+            'cd',
+            'dc',
+            'dg',
+            'dm',
+            'e',
+            'f',
+            'g',  # create or modify
+            'k',
+            'm',
+            'p',  # path conflicts
+            'pr',  # files to rename
+            'r',
+        ]
+    )
     numerrors = 0
     for conflict in conflicts:
         # The action tuple is:
@@ -214,8 +242,10 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
             # We don't record this as a conflict for now.
             # We will report the error, but the file will show modified in
             # the working directory status after the update returns.
-            repo.ui.write_err(_('error updating %s: %s\n') %
-                              (conflict.path, conflict.message))
+            repo.ui.write_err(
+                _('error updating %s: %s\n') %
+                (conflict.path, conflict.message)
+            )
             numerrors += 1
             continue
         elif conflict.type == ConflictType.MODIFIED_REMOVED:
@@ -234,10 +264,7 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
             # than `not force`, this seems close enough.
             backup = not force
             action_type = 'g'
-            action = (
-                dest.manifest().flags(conflict.path),
-                backup
-            )
+            action = (dest.manifest().flags(conflict.path), backup)
             prompt = "remote created"
         elif conflict.type == ConflictType.REMOVED_MODIFIED:
             action_type = 'dc'
@@ -250,8 +277,9 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
             continue
         elif conflict.type == ConflictType.MODIFIED_MODIFIED:
             action_type = 'm'
-            action = (conflict.path, conflict.path, conflict.path,
-                      False, src.node())
+            action = (
+                conflict.path, conflict.path, conflict.path, False, src.node()
+            )
             prompt = "versions differ"
         elif conflict.type == ConflictType.DIRECTORY_NOT_EMPTY:
             # This is a file in a directory that Eden would have normally
@@ -259,16 +287,18 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
             # untracked file was here. Just leave it be.
             continue
         else:
-            raise Exception('unknown conflict type received from eden: '
-                            '%r, %r, %r' % (conflict.type, conflict.path,
-                                            conflict.message))
+            raise Exception(
+                'unknown conflict type received from eden: '
+                '%r, %r, %r' % (conflict.type, conflict.path, conflict.message)
+            )
 
         actions[action_type].append((conflict.path, action, prompt))
 
     # Call applyupdates
     # Note that applyupdates may mutate actions.
-    stats = mergemod.applyupdates(repo, actions, wctx, dest,
-                                  overwrite=False, labels=labels)
+    stats = mergemod.applyupdates(
+        repo, actions, wctx, dest, overwrite=False, labels=labels
+    )
 
     # Add the error count to the number of unresolved files.
     # This ensures we exit unsuccessfully if there were any errors
@@ -289,6 +319,7 @@ def wrapdirstate(orig, repo):
 
 class EdenMatchInfo(object):
     ''' Holds high fidelity information about a matching operation '''
+
     def __init__(self, root, cwd, exact, patterns, includes, excludes):
         self._root = root
         self._cwd = cwd
@@ -311,8 +342,9 @@ class EdenMatchInfo(object):
                 # so now pat is relative to self._root.
                 #
                 # An "exact" matcher should always match files only.
-                if not self._exact and os.path.isdir(os.path.join(self._root,
-                                                                  pat)):
+                if not self._exact and os.path.isdir(
+                    os.path.join(self._root, pat)
+                ):
                     if pat == '':
                         # In general, we should be wary if the user is
                         # attempting something that will match all of the files
@@ -329,7 +361,8 @@ class EdenMatchInfo(object):
                 continue
 
             raise NotImplementedError(
-                'match pattern %r is not supported by Eden' % (kind, pat, raw))
+                'match pattern %r is not supported by Eden' % (kind, pat, raw)
+            )
         return globs
 
     def get_explicitly_matched_files(self):
@@ -354,9 +387,22 @@ class EdenMatchInfo(object):
         return str(self.make_glob_list())
 
 
-def wrap_match(orig, root, cwd, patterns, include=None, exclude=None,
-                    default='glob', exact=False, auditor=None, ctx=None,
-                    listsubrepos=False, warn=None, badfn=None, icasefs=False):
+def wrap_match(
+    orig,
+    root,
+    cwd,
+    patterns,
+    include=None,
+    exclude=None,
+    default='glob',
+    exact=False,
+    auditor=None,
+    ctx=None,
+    listsubrepos=False,
+    warn=None,
+    badfn=None,
+    icasefs=False
+):
     ''' Wrapper around matcher.match.__init__
         The goal is to capture higher fidelity information about the matcher
         being created than we would otherwise be able to extract from the
@@ -389,16 +435,19 @@ def wrap_match(orig, root, cwd, patterns, include=None, exclude=None,
                               the same directory
         '<something>' - a pattern of the specified default type
     '''
-    res = orig(root, cwd, patterns, include, exclude, default,
-               exact, auditor, ctx, listsubrepos, warn, badfn, icasefs)
+    res = orig(
+        root, cwd, patterns, include, exclude, default, exact, auditor, ctx,
+        listsubrepos, warn, badfn, icasefs
+    )
 
-    info = EdenMatchInfo(root, cwd, exact,
-                         matchmod._donormalize(patterns or [],
-                                               default, root, cwd, auditor, False),
-                         matchmod._donormalize(include or [],
-                                               'glob', root, cwd, auditor, False),
-                         matchmod._donormalize(exclude or [],
-                                               'glob', root, cwd, auditor, False))
+    info = EdenMatchInfo(
+        root, cwd, exact,
+        matchmod._donormalize(
+            patterns or [], default, root, cwd, auditor, False
+        ),
+        matchmod._donormalize(include or [], 'glob', root, cwd, auditor, False),
+        matchmod._donormalize(exclude or [], 'glob', root, cwd, auditor, False)
+    )
 
     res._eden_match_info = info
 
@@ -414,9 +463,10 @@ def wrap_match_exact(orig, root, cwd, files, badfn=None):
         files = list(files)
 
     # Normalize the patterns for the EdenMatchInfo and create it.
-    patterns = matchmod._donormalize(files, 'path', root, cwd, auditor=None,
-                                     warn=False)
-    res._eden_match_info = EdenMatchInfo(root, cwd, exact=True,
-                                         patterns=patterns, includes=[],
-                                         excludes=[])
+    patterns = matchmod._donormalize(
+        files, 'path', root, cwd, auditor=None, warn=False
+    )
+    res._eden_match_info = EdenMatchInfo(
+        root, cwd, exact=True, patterns=patterns, includes=[], excludes=[]
+    )
     return res
