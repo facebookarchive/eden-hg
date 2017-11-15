@@ -30,11 +30,17 @@ from mercurial import merge as mergemod
 from mercurial.i18n import _
 from mercurial import match as matchmod
 from . import EdenThriftClient as thrift
+from . import constants
 ConflictType = thrift.ConflictType
 
-_requirement = 'eden'
 _repoclass = localrepo.localrepository
-_repoclass._basesupported.add(_requirement)
+_repoclass._basesupported.add(constants.requirement)
+
+# Import the "cmdtable" variable from our commands module.
+# Note that this is not unused even though we do not appear to use it:
+# the mercurial extension framework automatically looks for this variable
+# and will register all commands it contains.
+from .commands import cmdtable  # noqa: F401
 
 
 def extsetup(ui):
@@ -53,7 +59,7 @@ def extsetup(ui):
 
 
 def invalidatedirstate(orig, self):
-    if _requirement in self.requirements:
+    if constants.requirement in self.requirements:
         self.dirstate.invalidate()
     else:
         # In Eden, we do not want the original behavior of
@@ -310,7 +316,7 @@ def reposetup(ui, repo):
 
 
 def wrapdirstate(orig, repo):
-    if _requirement not in repo.requirements:
+    if constants.requirement not in repo.requirements:
         return orig(repo)
     else:
         from . import eden_dirstate as dirstate_reimplementation

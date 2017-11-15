@@ -64,10 +64,22 @@ class eden_dirstate(dirstate.dirstate):
         # This seems like the type of O(repo) operation that should not be
         # allowed. Or if it is, it should be through a separate, explicit
         # codepath.
+        #
+        # We do provide edeniteritems() for users to iterate through only the
+        # files explicitly tracked in the eden dirstate.
         raise NotImplementedError('eden_dirstate.iteritems()')
 
     def dirs(self):  # override
         raise NotImplementedError('eden_dirstate.dirs()')
+
+    def edeniteritems(self):
+        '''
+        Walk over all items tracked in the eden dirstate.
+
+        This includes non-normal files (e.g., files marked for addition or
+        removal), as well as normal files that have merge state information.
+        '''
+        return self._map._map.iteritems()
 
     def walk(self, match, subrepos, unknown, ignored, full=True):  # override
         '''
