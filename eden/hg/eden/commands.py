@@ -47,7 +47,7 @@ def debugdirstate(ui, repo, **opts):
         # if the dirstate file contains other values.
         # However, just return the integer value as a string so we can use
         # debugdirstate to help debug this situation if it does occur.
-        return str(merge_state)
+        return str(value)
 
     if opts.get('json'):
         data = {}
