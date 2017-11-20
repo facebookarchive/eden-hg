@@ -110,21 +110,6 @@ class EdenThriftClient(object):
         with self._get_client() as client:
             return client.getManifestEntry(self._root, relativePath)
 
-    def getParentCommits(self):
-        '''
-        Returns a tuple containing the IDs of the working directory's parent
-        commits.
-
-        The first element of the tuple is always a 20-byte binary value
-        containing the commit ID.
-
-        The second element of the tuple is None if there is only one parent,
-        or the second parent ID as a 20-byte binary value.
-        '''
-        with self._get_client() as client:
-            parents = client.getParentCommits(self._root)
-        return (parents.parent1, parents.parent2)
-
     def setHgParents(self, p1, p2):
         if p2 == node.nullid:
             p2 = None
