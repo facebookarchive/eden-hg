@@ -59,6 +59,7 @@ with demandimport.deactivated():
 
 create_thrift_client = eden_thrift_module.create_thrift_client
 ScmFileStatus = eden_ttypes.ScmFileStatus
+CheckoutMode = eden_ttypes.CheckoutMode
 ConflictType = eden_ttypes.ConflictType
 FileInformationOrError = eden_ttypes.FileInformationOrError
 ManifestEntry = eden_ttypes.ManifestEntry
@@ -195,9 +196,9 @@ class EdenThriftClient(object):
 
         return status
 
-    def checkout(self, node, force):
+    def checkout(self, node, checkout_mode):
         with self._get_client() as client:
-            return client.checkOutRevision(self._root, node, force)
+            return client.checkOutRevision(self._root, node, checkout_mode)
 
     def glob(self, globs):
         with self._get_client() as client:

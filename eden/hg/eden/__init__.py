@@ -4,7 +4,6 @@
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2.
-
 """
 Mercurial extension for supporting eden client checkouts.
 
@@ -17,6 +16,7 @@ from __future__ import print_function
 
 import os
 import sys
+from six import iteritems
 
 # Update sys.path so that we can find modules that we need.
 #
@@ -31,6 +31,7 @@ from mercurial.i18n import _
 from mercurial import match as matchmod
 from . import EdenThriftClient as thrift
 from . import constants
+CheckoutMode = thrift.CheckoutMode
 ConflictType = thrift.ConflictType
 
 _repoclass = localrepo.localrepository
@@ -136,10 +137,10 @@ def merge_update(
         if not force:
             # Make sure there isn't an outstanding merge or unresolved files.
             if len(parents) > 1:
-                raise error.Abort(_("outstanding uncommitted merge"))
+                raise error.Abort(_('outstanding uncommitted merge'))
             ms = mergemod.mergestate.read(repo)
             if list(ms.unresolved()):
-                raise error.Abort(_("outstanding merge conflicts"))
+                raise error.Abort(_('outstanding merge conflicts'))
 
             # The vanilla merge code disallows updating between two unrelated
             # branches if the working directory is dirty.  I don't really see a
@@ -152,31 +153,43 @@ def merge_update(
         # note that we're in the middle of an update
         repo.vfs.write('updatestate', destctx.hex())
 
+        stats = 0, 0, 0, 0
+        actions = {}
+
         # Ask eden to perform the checkout
-        if force or p1ctx != destctx:
-            # Write out pending transaction data if there is a transaction in
-            # progress, so eden will be able to access the destination node.
-            tr = repo.currenttransaction()
-            if tr is not None:
-                tr.writepending()
+        if force:
+            conflicts = repo.dirstate.eden_client.checkout(
+                destctx.node(), CheckoutMode.FORCE
+            )
+        elif p1ctx == destctx:
+            # No update to perform.
+            conflicts = None
+        else:
+            # If we are in noconflict mode, then we must do a DRY_RUN first to
+            # see if there are any conflicts that should prevent us from
+            # attempting the update.
+            if updatecheck == 'noconflict':
+                conflicts = repo.dirstate.eden_client.checkout(
+                    destctx.node(), CheckoutMode.DRY_RUN
+                )
+                if conflicts:
+                    actions = _determine_actions_for_conflicts(
+                        repo, p1ctx, conflicts
+                    )
+                    _check_actions_and_raise_if_there_are_conflicts(actions)
 
             conflicts = repo.dirstate.eden_client.checkout(
-                destctx.node(), force=force
+                destctx.node(), CheckoutMode.NORMAL
             )
-        else:
-            conflicts = None
+            # TODO(mbolin): Add a warning if we did a DRY_RUN and the conflicts
+            # we get here do not match. Only in the event of a race would we
+            # expect them to differ from when the DRY_RUN was done (or if we
+            # decide that DIRECTORY_NOT_EMPTY conflicts do not need to be
+            # reported during a DRY_RUN).
 
-        # Handle any conflicts
-        # The stats returned are numbers of files affected:
-        #   (updated, merged, removed, unresolved)
-        # The updated and removed file counts will always be 0 in our case.
-        if conflicts and not force:
-            stats, actions = _handleupdateconflicts(
+            stats, actions = _handle_update_conflicts(
                 repo, wctx, p1ctx, destctx, labels, conflicts, force
             )
-        else:
-            stats = 0, 0, 0, 0
-            actions = {}
 
         with repo.dirstate.parentchange():
             if force:
@@ -211,7 +224,7 @@ def update_showstats(orig, repo, stats, quietempty=False):
         repo.ui.status(_('update complete\n'))
 
 
-def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
+def _handle_update_conflicts(repo, wctx, src, dest, labels, conflicts, force):
     # When resolving conflicts during an update operation, the working
     # directory (wctx) is one side of the merge, the destination commit (dest)
     # is the other side of the merge, and the source commit (src) is treated as
@@ -224,7 +237,12 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
     # the local changes in the working directory (against A) to the new
     # location B.  Using A as the common ancestor in this operation is the
     # desired behavior.
+    actions = _determine_actions_for_conflicts(repo, src, conflicts)
+    return _applyupdates(repo, actions, wctx, dest, labels, conflicts)
 
+
+def _determine_actions_for_conflicts(repo, src, conflicts):
+    '''Calculate the actions for _applyupdates().'''
     # Build a list of actions to pass to mergemod.applyupdates()
     actions = dict(
         (m, [])
@@ -245,7 +263,7 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
             'r',
         ]
     )
-    numerrors = 0
+
     for conflict in conflicts:
         # The action tuple is:
         # - path_in_1, path_in_2, path_in_ancestor, move, ancestor_node
@@ -258,26 +276,21 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
                 _('error updating %s: %s\n') %
                 (conflict.path, conflict.message)
             )
-            numerrors += 1
             continue
         elif conflict.type == ConflictType.MODIFIED_REMOVED:
             action_type = 'cd'
             action = (conflict.path, None, conflict.path, False, src.node())
             prompt = "prompt changed/deleted"
         elif conflict.type == ConflictType.UNTRACKED_ADDED:
-            # In the normal flow of merge.py, the initial action for this file
-            # would be 'c' in the actions returned by manifestmerge(), but then
-            # it would get replaced with 'g' when the actions are treated by
-            # _checkunknownfiles(), so we must reflect the net result to
-            # maintain parity with Mercurial.
-            #
-            # Although in the implementation of _checkunknownfiles(), the logic
-            # to decide whether a backup should be made is slightly more complex
-            # than `not force`, this seems close enough.
-            backup = not force
-            action_type = 'g'
-            action = (dest.manifest().flags(conflict.path), backup)
-            prompt = "remote created"
+            # In core Mercurial, this is the case where the file does not exist
+            # in the manifest of the common ancestor for the merge.
+            # TODO(mbolin): Check for the "both renamed from " case in
+            # manifestmerge(), which is the other possibility when the file
+            # does not exist in the manifest of the common ancestor for the
+            # merge.
+            action_type = 'm'
+            action = (conflict.path, conflict.path, None, False, src.node())
+            prompt = 'both created'
         elif conflict.type == ConflictType.REMOVED_MODIFIED:
             action_type = 'dc'
             action = (None, conflict.path, conflict.path, False, src.node())
@@ -305,6 +318,23 @@ def _handleupdateconflicts(repo, wctx, src, dest, labels, conflicts, force):
             )
 
         actions[action_type].append((conflict.path, action, prompt))
+
+    return actions
+
+
+def _check_actions_and_raise_if_there_are_conflicts(actions):
+    # In stock Hg, update() performs this check once it gets the set of actions.
+    for action_type, list_of_tuples in iteritems(actions):
+        if len(list_of_tuples) == 0:
+            continue  # Note `actions` defaults to [] for all keys.
+        if action_type not in ('g', 'k', 'e', 'r', 'pr'):
+            msg = _('conflicting changes')
+            hint = _('commit or update --clean to discard changes')
+            raise error.Abort(msg, hint=hint)
+
+
+def _applyupdates(repo, actions, wctx, dest, labels, conflicts):
+    numerrors = sum(1 for c in conflicts if c.type == ConflictType.ERROR)
 
     # Call applyupdates
     # Note that applyupdates may mutate actions.
