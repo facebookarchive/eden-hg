@@ -4,6 +4,7 @@
 #
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2.
+
 """
 Mercurial extension for supporting eden client checkouts.
 
@@ -158,12 +159,22 @@ def merge_update(
 
         # Ask eden to perform the checkout
         if force:
+            # eden_client.checkout() returns the list of conflicts here,
+            # but since this is a force update it will have already replaced
+            # the conflicts with the destination file state, so we don't have
+            # to do anything with them here.
             conflicts = repo.dirstate.eden_client.checkout(
                 destctx.node(), CheckoutMode.FORCE
             )
+            # We do still need to make sure to update the merge state though.
+            # In the non-force code path the merge state is updated in
+            # _handle_update_conflicts().
+            ms = mergemod.mergestate.clean(repo, p1ctx.node(), destctx.node(),
+                                           labels)
+            ms.commit()
         elif p1ctx == destctx:
             # No update to perform.
-            conflicts = None
+            pass
         else:
             # If we are in noconflict mode, then we must do a DRY_RUN first to
             # see if there are any conflicts that should prevent us from
