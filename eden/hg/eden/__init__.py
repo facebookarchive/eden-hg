@@ -85,7 +85,8 @@ def merge_update(
     labels=None,
     matcher=None,
     mergeforce=False,
-    updatecheck=None
+    updatecheck=None,
+    wc=None
 ):
     '''Apparently node can be a 20-byte hash or an integer referencing a
     revision number.
