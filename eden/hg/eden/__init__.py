@@ -123,7 +123,9 @@ def merge_update(
             mergeancestor=mergeancestor,
             labels=labels,
             matcher=matcher,
-            mergeforce=mergeforce
+            mergeforce=mergeforce,
+            updatecheck=updatecheck,
+            wc=wc
         )
     else:
         repo.ui.debug('using eden update code path\n')
