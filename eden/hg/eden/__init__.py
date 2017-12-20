@@ -95,7 +95,7 @@ def merge_update(
 
     if not util.safehasattr(repo.dirstate, 'eden_client'):
         why_not_eden = 'This is not an eden repository.'
-    if matcher is not None and not matcher.always():
+    elif matcher is not None and not matcher.always():
         why_not_eden = (
             'We don\'t support doing a partial update through '
             'eden yet.'
