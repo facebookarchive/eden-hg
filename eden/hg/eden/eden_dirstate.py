@@ -29,9 +29,6 @@ class statobject(object):
         self.st_size = size
         self.st_mtime = mtime
 
-    def __str__(self):
-        return str(dict([(m, getattr(self, m)) for m in self.__slots__]))
-
 
 class eden_dirstate(dirstate.dirstate):
     def __init__(self, repo, ui, root):
