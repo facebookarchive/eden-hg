@@ -36,7 +36,6 @@ CheckoutMode = thrift.CheckoutMode
 ConflictType = thrift.ConflictType
 
 _repoclass = localrepo.localrepository
-_repoclass._basesupported.add(constants.requirement)
 
 # Import the "cmdtable" variable from our commands module.
 # Note that this is not unused even though we do not appear to use it:
@@ -58,6 +57,8 @@ def extsetup(ui):
     extensions.wrapfunction(matchmod, 'match', wrap_match)
     extensions.wrapfunction(matchmod, 'exact', wrap_match_exact)
     orig.paths = ()
+
+    _repoclass._basesupported.add(constants.requirement)
 
 
 def invalidatedirstate(orig, self):
