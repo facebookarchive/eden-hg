@@ -10,8 +10,10 @@ from __future__ import division
 from __future__ import print_function
 
 from mercurial import dirstate, policy, scmutil, sparse as sparsemod, util
+from mercurial.node import nullid
 from . import EdenThriftClient as thrift
 from . import eden_dirstate_map as eden_dirstate_map
+from eden.dirstate import (MERGE_STATE_BOTH_PARENTS, MERGE_STATE_OTHER_PARENT)
 import errno
 import stat
 import os
@@ -262,3 +264,42 @@ class eden_dirstate(dirstate.dirstate):
         # dirstate code.
         super(eden_dirstate, self).rebuild(parent, allfiles=[],
                                            changedfiles=changedfiles)
+
+    def normallookup(self, f):  # override
+        '''Mark a file normal, but possibly dirty.'''
+        if self._pl[1] != nullid:
+            # if there is a merge going on and the file was either
+            # in state 'm' (-1) or coming from other parent (-2) before
+            # being removed, restore that state.
+            #
+            # Note that we intentionally use self._map._map.get() here
+            # rather than self._map.get() to avoid making a thrift call to Eden
+            # if this file is already normal.
+            entry = self._map._map.get(f)
+            if entry is not None:
+                status, mode, merge_state = entry
+                if status == 'r' and merge_state in (
+                        MERGE_STATE_BOTH_PARENTS, MERGE_STATE_OTHER_PARENT):
+                    source = self._map.copymap.get(f)
+                    if merge_state == MERGE_STATE_BOTH_PARENTS:
+                        self.merge(f)
+                    elif merge_state == MERGE_STATE_OTHER_PARENT:
+                        self.otherparent(f)
+                    if source:
+                        self.copy(source, f)
+                    return
+                if status == 'm':
+                    return
+                if status == 'n' and merge_state == MERGE_STATE_OTHER_PARENT:
+                    return
+
+        # TODO: Just invoke self.normal() here for now.
+        # Our self.status() function always returns an empty list for the first
+        # entry of the returned tuple.  (This is the list of files that we're
+        # unsure about and need to check on disk.)  Therefore the
+        # workingctx._dirstatestatus() code never fixes up entries with the
+        # mtime set to -1.
+        #
+        # Ideally we should replace self.normal() too; we should be able to
+        # avoid the filesystem stat call in self.normal() anyway.
+        self.normal(f)
