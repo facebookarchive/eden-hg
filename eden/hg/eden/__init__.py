@@ -102,9 +102,20 @@ def merge_update(
             'eden yet.'
         )
     elif branchmerge:
+        # TODO: We potentially should support handling this scenario ourself in
+        # the future.  For now we simply haven't investigated what the correct
+        # semantics are in this case.
         why_not_eden = 'branchmerge is "truthy:" %s.' % branchmerge
     elif ancestor is not None:
+        # TODO: We potentially should support handling this scenario ourself in
+        # the future.  For now we simply haven't investigated what the correct
+        # semantics are in this case.
         why_not_eden = 'ancestor is not None: %s.' % ancestor
+    elif wc is not None and wc.isinmemory():
+        # In memory merges do not operate on the working directory,
+        # so we don't need to ask eden to change the working directory state
+        # at all, and can use the vanilla merge logic in this case.
+        why_not_eden = 'merge is in-memory'
     else:
         # TODO: We probably also need to set why_not_eden if there are
         # subrepositories.  (Personally I might vote for just not supporting
