@@ -429,7 +429,7 @@ class EdenMatchInfo(object):
                 continue
 
             raise NotImplementedError(
-                'match pattern %r is not supported by Eden' % (kind, pat, raw)
+                'match pattern %r:%r is not supported by Eden' % (kind, pat)
             )
         return globs
 
