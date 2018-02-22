@@ -33,12 +33,6 @@ class eden_dirstate_map(dirstate.dirstatemap):
         self._repo = repo
 
     def setparents(self, p1, p2):
-        # If a transaction is currently in progress, make sure it has flushed
-        # pending commit data to disk so that eden will be able to access it.
-        txn = self._repo.currenttransaction()
-        if txn is not None:
-            txn.writepending()
-
         super(eden_dirstate_map, self).setparents(p1, p2)
         # TODO(mbolin): Do not make this Thrift call to Eden until the
         # transaction is committed.

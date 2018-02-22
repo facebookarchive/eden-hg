@@ -94,6 +94,7 @@ class ClientStatus(object):
 
 class EdenThriftClient(object):
     def __init__(self, repo):
+        self._repo = repo
         self._root = repo.root
 
     def _get_client(self):
@@ -114,6 +115,8 @@ class EdenThriftClient(object):
     def setHgParents(self, p1, p2):
         if p2 == node.nullid:
             p2 = None
+
+        self._flushPendingTransactions()
 
         parents = eden_ttypes.WorkingDirectoryParents(parent1=p1, parent2=p2)
         with self._get_client() as client:
@@ -197,6 +200,7 @@ class EdenThriftClient(object):
         return status
 
     def checkout(self, node, checkout_mode):
+        self._flushPendingTransactions()
         with self._get_client() as client:
             return client.checkOutRevision(self._root, node, checkout_mode)
 
@@ -207,3 +211,10 @@ class EdenThriftClient(object):
     def getFileInformation(self, files):
         with self._get_client() as client:
             return client.getFileInformation(self._root, files)
+
+    def _flushPendingTransactions(self):
+        # If a transaction is currently in progress, make sure it has flushed
+        # pending commit data to disk so that eden will be able to access it.
+        txn = self._repo.currenttransaction()
+        if txn is not None:
+            txn.writepending()
