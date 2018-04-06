@@ -126,7 +126,10 @@ class EdenThriftClient(object):
         # type(bool, eden_dirstate_map, ui) -> ClientStatus
         status = ClientStatus()
         with self._get_client() as client:
-            thrift_hg_status = client.getScmStatus(self._root, list_ignored)
+            thrift_hg_status = client.getScmStatus(
+                self._root, list_ignored,
+                dirstate_map.parents()[0]
+            )
 
         # The Eden getStatus() Thrift call is not SCM-aware. We must incorporate
         # the information in our eden_dirstate_map to determine the overall
