@@ -162,13 +162,30 @@ def merge_update(
             # we committed the changes, checked out the other branch then tried
             # to graft the changes here.
 
+            if p1ctx == destctx:
+                # No update to perform.
+                # Just invoke the hooks and return.
+                repo.hook('preupdate', throw=True, parent1=deststr, parent2='')
+                repo.hook('update', parent1=deststr, parent2='', error=0)
+                return 0, 0, 0, 0
+
+            # If we are in noconflict mode, then we must do a DRY_RUN first to
+            # see if there are any conflicts that should prevent us from
+            # attempting the update.
+            if updatecheck == 'noconflict':
+                conflicts = repo.dirstate.eden_client.checkout(
+                    destctx.node(), CheckoutMode.DRY_RUN
+                )
+                if conflicts:
+                    actions = _determine_actions_for_conflicts(
+                        repo, p1ctx, conflicts
+                    )
+                    _check_actions_and_raise_if_there_are_conflicts(actions)
+
         # Invoke the preupdate hook
         repo.hook('preupdate', throw=True, parent1=deststr, parent2='')
-        # note that we're in the middle of an update
+        # Record that we're in the middle of an update
         repo.vfs.write('updatestate', destctx.hex())
-
-        stats = 0, 0, 0, 0
-        actions = {}
 
         # Ask eden to perform the checkout
         if force:
@@ -185,23 +202,10 @@ def merge_update(
             ms = mergemod.mergestate.clean(repo, p1ctx.node(), destctx.node(),
                                            labels)
             ms.commit()
-        elif p1ctx == destctx:
-            # No update to perform.
-            pass
-        else:
-            # If we are in noconflict mode, then we must do a DRY_RUN first to
-            # see if there are any conflicts that should prevent us from
-            # attempting the update.
-            if updatecheck == 'noconflict':
-                conflicts = repo.dirstate.eden_client.checkout(
-                    destctx.node(), CheckoutMode.DRY_RUN
-                )
-                if conflicts:
-                    actions = _determine_actions_for_conflicts(
-                        repo, p1ctx, conflicts
-                    )
-                    _check_actions_and_raise_if_there_are_conflicts(actions)
 
+            stats = 0, 0, 0, 0
+            actions = {}
+        else:
             conflicts = repo.dirstate.eden_client.checkout(
                 destctx.node(), CheckoutMode.NORMAL
             )
@@ -348,13 +352,32 @@ def _determine_actions_for_conflicts(repo, src, conflicts):
 
 def _check_actions_and_raise_if_there_are_conflicts(actions):
     # In stock Hg, update() performs this check once it gets the set of actions.
+    conflict_paths = []
     for action_type, list_of_tuples in iteritems(actions):
         if len(list_of_tuples) == 0:
             continue  # Note `actions` defaults to [] for all keys.
         if action_type not in ('g', 'k', 'e', 'r', 'pr'):
-            msg = _('conflicting changes')
-            hint = _('commit or update --clean to discard changes')
-            raise error.Abort(msg, hint=hint)
+            conflict_paths.extend(t[0] for t in list_of_tuples)
+
+    # Report the exact files with conflicts.
+    # There can be conflicts even when `hg status` reports no modifications if
+    # the conflicts are between ignored files that exist in the destination
+    # commit.
+    if conflict_paths:
+        # Only show 10 lines worth of conflicts
+        conflict_paths.sort()
+        max_to_show = 10
+        if len(conflict_paths) > max_to_show:
+            # If there are more than 10 conflicts, show the first 9
+            # and make the last line report how many other conflicts there are
+            total_conflicts = len(conflict_paths)
+            conflict_paths = conflict_paths[:max_to_show - 1]
+            num_remaining = total_conflicts - len(conflict_paths)
+            conflict_paths.append('... (%d more conflicts)' % num_remaining)
+        msg = (_("conflicting changes:\n  ") +
+               "\n  ".join(conflict_paths))
+        hint = _("commit or update --clean to discard changes")
+        raise error.Abort(msg, hint=hint)
 
 
 def _applyupdates(repo, actions, wctx, dest, labels, conflicts):
