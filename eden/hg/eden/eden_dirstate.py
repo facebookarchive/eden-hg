@@ -9,8 +9,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from mercurial import dirstate, policy, scmutil, sparse as sparsemod, util
-from mercurial import match as matchmod
+from mercurial import (
+    dirstate, encoding, match as matchmod, policy, scmutil,
+    sparse as sparsemod, util
+)
 from mercurial.node import nullid
 from . import EdenThriftClient as thrift
 from . import eden_dirstate_map as eden_dirstate_map
@@ -235,6 +237,36 @@ class eden_dirstate(dirstate.dirstate):
                 if filename not in classified_files:
                     clean_files.append(filename)
             edenstatus.clean = clean_files
+
+        def ismissing(fn):
+            if fn in edenstatus.deleted or fn in edenstatus.removed:
+                return True
+            dirpath = fn + '/'
+            for d in edenstatus.deleted:
+                if d.startswith(dirpath):
+                    return True
+            for d in edenstatus.removed:
+                if d.startswith(dirpath):
+                    return True
+            return False
+
+        # Process all explicit patterns in the match, and call match.bad()
+        # or match.explicitdir() if necessary
+        for fn in sorted(match.files()):
+            try:
+                mode = os.lstat(os.path.join(self._root, fn)).st_mode
+                if stat.S_IFMT(mode) == stat.S_IFDIR:
+                    if match.explicitdir:
+                        match.explicitdir(fn)
+            except OSError as ex:
+                # Check to see if this refers to a removed file or directory.
+                # Call match.bad() otherwise
+                #
+                # TODO: We might be able to do this check more efficiently
+                # if we merged it with some of the code in
+                # EdenThriftClient.getStatus()
+                if not ismissing(fn):
+                    match.bad(fn, encoding.strtolocal(ex.strerror))
 
         status = scmutil.status(
             [f for f in edenstatus.modified if match(f)],
