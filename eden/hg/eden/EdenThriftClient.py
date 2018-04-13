@@ -66,32 +66,6 @@ ManifestEntry = eden_ttypes.ManifestEntry
 NoValueForKeyError = eden_ttypes.NoValueForKeyError
 
 
-class ClientStatus(object):
-    def __init__(self):
-        self.modified = []
-        self.added = []
-        self.removed = []
-        self.deleted = []
-        self.unknown = []
-        self.ignored = []
-        self.clean = []
-
-    def __repr__(self):
-        return (
-            'ClientStatus(modified={modified}; added={added}; '
-            'removed={removed}; deleted={deleted}; unknown={unknown}; '
-            'ignored={ignored}; clean={clean}'
-        ).format(
-            modified=self.modified,
-            added=self.added,
-            removed=self.removed,
-            deleted=self.deleted,
-            unknown=self.unknown,
-            ignored=self.ignored,
-            clean=self.clean
-        )
-
-
 class EdenThriftClient(object):
     def __init__(self, repo):
         self._repo = repo
@@ -122,85 +96,14 @@ class EdenThriftClient(object):
         with self._get_client() as client:
             client.resetParentCommits(self._root, parents)
 
-    def getStatus(self, list_ignored, dirstate_map, ui):  # noqa: C901
-        # type(bool, eden_dirstate_map, ui) -> ClientStatus
-        status = ClientStatus()
+    def getStatus(self, parent, list_ignored):  # noqa: C901
+        # type(str, bool) -> Dict[str, int]
         with self._get_client() as client:
-            thrift_hg_status = client.getScmStatus(
-                self._root, list_ignored,
-                dirstate_map.parents()[0]
+            return client.getScmStatus(
+                self._root,
+                list_ignored,
+                parent,
             )
-
-        # The Eden getStatus() Thrift call is not SCM-aware. We must incorporate
-        # the information in our eden_dirstate_map to determine the overall
-        # status.
-
-        dirstates = dirstate_map.create_clone_of_internal_map()
-
-        for path, code in thrift_hg_status.entries.iteritems():
-            if code == ScmFileStatus.MODIFIED:
-                # It is possible that the user can mark a file for removal, but
-                # then modify it. If it is marked for removal, it should be
-                # reported as such by `hg status` even though it is still on
-                # disk.
-                dirstate = dirstates.pop(path, None)
-                if dirstate and dirstate[0] == 'r':
-                    status.removed.append(path)
-                else:
-                    status.modified.append(path)
-            elif code == ScmFileStatus.REMOVED:
-                # If the file no longer exits, we must check to see whether the
-                # user explicitly marked it for removal.
-                dirstate = dirstates.pop(path, None)
-                if dirstate and dirstate[0] == 'r':
-                    status.removed.append(path)
-                else:
-                    status.deleted.append(path)
-            elif code == ScmFileStatus.ADDED:
-                dirstate = dirstates.pop(path, None)
-                if dirstate:
-                    state = dirstate[0]
-                    if state == 'a' or (
-                        state == 'n' and
-                        dirstate[2] == eden.dirstate.MERGE_STATE_OTHER_PARENT
-                    ):
-                        status.added.append(path)
-                    else:
-                        status.unknown.append(path)
-                else:
-                    status.unknown.append(path)
-            elif code == ScmFileStatus.IGNORED:
-                # Although Eden may think the file should be ignored as per
-                # .gitignore, it is possible the user has overridden that
-                # default behavior by marking it for addition.
-                dirstate = dirstates.pop(path, None)
-                if dirstate and dirstate[0] == 'a':
-                    status.added.append(path)
-                else:
-                    status.ignored.append(path)
-            else:
-                raise Exception('Unexpected status code: %s' % code)
-
-        for path, entry in dirstates.iteritems():
-            state = entry[0]
-            if state == 'm':
-                if entry[2] == 0:
-                    ui.warn(
-                        'Unexpected Nonnormal file ' + path + ' has a '
-                        'merge state of NotApplicable while its has been '
-                        'marked as "needs merging".'
-                    )
-                else:
-                    status.modified.append(path)
-            elif state == 'a':
-                if os.path.isfile(os.path.join(self._root, path)):
-                    status.added.append(path)
-                else:
-                    status.deleted.append(path)
-            elif state == 'r':
-                status.removed.append(path)
-
-        return status
 
     def checkout(self, node, checkout_mode):
         self._flushPendingTransactions()

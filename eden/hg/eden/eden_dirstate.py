@@ -15,6 +15,7 @@ from mercurial import (
 )
 from mercurial.node import nullid
 from . import EdenThriftClient as thrift
+from .EdenThriftClient import ScmFileStatus
 from . import eden_dirstate_map as eden_dirstate_map
 from eden.dirstate import (MERGE_STATE_BOTH_PARENTS, MERGE_STATE_OTHER_PARENT)
 import errno
@@ -86,6 +87,60 @@ class eden_dirstate(dirstate.dirstate):
         '''
         return self._map._map.iteritems()
 
+    def _p1_ctx(self):
+        '''Return the context object for the first parent commit.'''
+        return self._map._repo.unfiltered()[self.p1()]
+
+    # Code paths that invoke dirstate.walk()
+    # - hg add
+    #   unknown=True, ignored=False, full=False
+    #   - only cares about returned paths
+    # - hg perfwalk (contrib/perf.py)
+    #   unknown=True, ignored=False
+    #   - only cares about returned paths
+    # - hg grep (hgext/tweakdefaults.py)
+    #   unknown=False, ignored=False
+    #   - cares about returned paths, whether exists, and is symlink or not
+    # - committablectx.walk()
+    #   unknown=True, ignored=False
+    #   - only cares about returned paths
+    # - mercurial/scmutil.py: _interestingfiles()
+    #   unknown=True, ignored=False, full=False
+    #   hg addremove
+    #   - cares about returned paths, dirstate status (which it has to
+    #     re-lookup), and whether they exist on disk or not
+    #
+    # Code paths that invoke context.walk()
+    # - mercurial/cmdutil.py:
+    #   - hg cat
+    #   - hg cp
+    #   - hg revert
+    # - hg annotate (mercurial/commands.py)
+    # - mercurial/debugcommands.py:
+    #   - hg debugfilerevision
+    #   - hg debugpickmergetool
+    #   - hg debugrename
+    #   - hg debugwalk
+    # - mercurial/fileset.py (_buildsubset)
+    # - hgext/catnotate.py
+    # - hgext/fastannotate/commands.py
+    # - hgext/fbsparse.py
+    # - hgext/remotefilelog/__init__.py
+    #
+    # Code paths that invoke scmutil._interestingfiles()
+    # - scmutil.addremove()
+    # - scmutil.marktouched()
+    #
+    # - full is primarily used by fsmonitor extension
+    # - I haven't seen any code path that calls with ignored=True
+    #
+    # match callbacks:
+    # - bad: called for file/directory patterns that don't match anything
+    # - explicitdir: called for patterns that match a directory
+    # - traversedir: used by `hg purge` (hgext/purge.py) to purge empty
+    #   directories
+    #   - we potentially should just implement purge inside Eden
+    #
     def walk(self, match, subrepos, unknown, ignored, full=True):  # override
         '''
         Walk recursively through the directory tree, finding all files
@@ -95,197 +150,281 @@ class eden_dirstate(dirstate.dirstate):
 
         Return a dict mapping filename to stat-like object
         '''
-        if unknown and not ignored and not full:
-            # We assume that this is being called from `hg add`, so we return
-            # everything that is eligible for addition and filtered by the
-            # matcher.
-            # TODO(mbolin): Instead of assuming `hg add`, do something robust.
-            # pre-add/post-add hooks might be appropriate.
-            clean = False
-            status = self.status(match, subrepos, ignored, clean, unknown)[1]
-            modified, added, removed, deleted, unknown, ignored, clean = status
-            candidates = unknown
+        edenstatus = self.eden_client.getStatus(
+            self.p1(), list_ignored=ignored
+        ).entries
 
-            # If the file is marked for removal, but it exists on disk, then
-            # include it in the list of files to add.
-            for removed_file in removed:
-                try:
-                    mode = os.stat(os.path.join(self._root, removed_file)).st_mode
-                    if stat.S_ISREG(mode) or stat.S_ISLNK(mode):
-                        candidates.append(removed_file)
-                except OSError as exception:
-                    err = exception.errno
-                    # As the file has likely been removed, it's expected that
-                    # the path may not exist, or one of the components of the
-                    # path prefix is not a directory.
-                    if err != errno.ENOENT and err != errno.ENOTDIR:
-                        raise
+        nonnormal = self._map._map
 
-            matched_files = [f for f in candidates if match(f)]
+        def get_stat(path):
+            try:
+                return os.lstat(os.path.join(self._root, path))
+            except OSError:
+                return None
 
-            # Finally, we have to account for the case where the user has
-            # explicitly tried to add an ignored file. We don't want to
-            # request ignored files when we call status() because the result set
-            # could be extremely large. Instead, we ask the matcher if any of
-            # its patterns are for a specific file, and if so, we add such files
-            # as potential candidates for addition.
-            #
-            # Note that users can explicitly add ignored *files*, but they
-            # cannot explicitly add ignored *directories* (each file in the
-            # directory would have to be added individually).
-            if not util.safehasattr(match, '_eden_match_info'):
-                raise NotImplementedError(
-                    'match object is not eden compatible'
-                    '(_eden_match_info is missing)'
-                )
-            info = match._eden_match_info
-            files = info.get_explicitly_matched_files()
-            if files:
-                matched_files_set = set(matched_files)
-                matched_files_set.update(files)
-                matched_files = list(matched_files_set)
-        else:
-            matched_files = self._eden_walk_helper(
-                match, deleted=True, unknown=unknown, ignored=ignored
-            )
-
-        # Now we need to build a stat-like-object for each of these results
-        file_info = self.eden_client.getFileInformation(matched_files)
+        # Store local variables for the status states, so they are cheaper
+        # to access in the loop below.  (It's somewhat unfortunate that python
+        # make this necessary.)
+        MODIFIED = ScmFileStatus.MODIFIED
+        REMOVED = ScmFileStatus.REMOVED
+        ADDED = ScmFileStatus.ADDED
+        IGNORED = ScmFileStatus.IGNORED
 
         results = {}
-        for index, info in enumerate(file_info):
-            file_name = matched_files[index]
-            if info.getType() == thrift.FileInformationOrError.INFO:
-                finfo = info.get_info()
-                results[file_name] = statobject(
-                    mode=finfo.mode, size=finfo.size, mtime=finfo.mtime
-                )
+        for path, code in edenstatus.iteritems():
+            if not match(path):
+                continue
+
+            # TODO: It would probably be better to update the thrift APIs to
+            # return the file status information, so we don't have to call
+            # os.lstat() here.  Most callers only really care about whether the
+            # file exists and if it is a symlink or a regular file.
+            if code == MODIFIED:
+                results[path] = get_stat(path)
+            elif code == ADDED:
+                # If unknown is False, we still want to report files explicitly
+                # marked as added in the dirstate.  We'll handle that case
+                # below when walking over the nonnormal list.
+                if unknown:
+                    results[path] = get_stat(path)
+            elif code == IGNORED:
+                # Eden should only return IGNORED results when ignored is True,
+                # so just go ahead and add this path to the results
+                results[path] = get_stat(path)
+            elif code == REMOVED:
+                results[path] = None
             else:
-                # Indicates that we knew of the file, but that is it
-                # not present on disk; it has been removed.
-                results[file_name] = None
+                raise Exception('Unexpected status code: %s' % code)
+
+        for path, entry in nonnormal.iteritems():
+            if path in results:
+                continue
+            if not match(path):
+                continue
+            results[path] = get_stat(path)
+
+        if full:
+            parent_mf = self._p1_ctx().manifest()
+            for path, flags in parent_mf.matches(match).iteritems():
+                if path in edenstatus or path in nonnormal:
+                    continue
+                if flags == 'l':
+                    mode = (stat.S_IFLNK | 0o777)
+                elif flags == 'x':
+                    mode = (stat.S_IFREG | 0o755)
+                else:
+                    mode = (stat.S_IFREG | 0o644)
+                # Pretty much all of the callers of walk() only care about
+                # the st_mode field.
+                results[path] = statobject(mode=mode, size=0, mtime=0)
+
+        explicit_matches = self._call_match_callbacks(match, results, ())
+        for path, mode in explicit_matches.iteritems():
+            if mode is None:
+                results[path] = None
+            else:
+                results[path] = statobject(mode=mode, size=0, mtime=0)
 
         return results
 
-    def _eden_walk_helper(self, match, deleted, unknown, ignored):
-        ''' Extract the matching information we collected from the
-            match constructor and try to turn it into a list of
-            glob expressions.  If we don't have enough information
-            for this, make_glob_list() will raise an exception '''
-        if not util.safehasattr(match, '_eden_match_info'):
-            raise NotImplementedError(
-                'match object is not eden compatible'
-                '(_eden_match_info is missing)'
-            )
-        info = match._eden_match_info
-        globs = info.make_glob_list()
+    def _call_match_callbacks(self, match, results1, results2):
+        '''
+        Process all explicit patterns in the match, and call match.bad()
+        or match.explicitdir() if necessary
 
-        # Expand the glob into a set of candidate files
-        globbed_files = self.eden_client.glob(globs)
+        Returns a dictionary of (path -> mode) for all explicit matches that
+        are not already present in the results.  The mode will be None if the
+        path does not exist on disk.
+        '''
+        # TODO: We do not currently invoke match.traversedir
+        # This is currently only used by `hg purge`, which uses it to remove
+        # empty directories.
+        # We probably should just build our own Eden-specific version of purge.
 
-        # Run the results through the matcher object; this processes
-        # any excludes that might be part of the matcher
-        matched_files = [f for f in globbed_files if match(f)]
+        explicit_matches = {}
 
-        if matched_files and (deleted or (not unknown) or (not ignored)):
-            # !unknown as parameter means that we need to exclude
-            # any files with an unknown status.
-            # !ignored -> exclude any ignored files.
-            # To get ignored files in the status list, we need to pass
-            # True when !ignored is passed in to us.
-            status = self._getStatus(not ignored)
-            elide = set()
-            if not unknown:
-                elide.update(status.unknown)
-            if not ignored:
-                elide.update(status.ignored)
-            if deleted:
-                elide.update(status.removed)
-                elide.update(status.deleted)
-
-            matched_files = [f for f in matched_files if f not in elide]
-
-        return matched_files
-
-    def status(self, match, subrepos, ignored, clean, unknown):  # override
-        # We should never have any files we are unsure about
-        unsure = []
-
-        edenstatus = self._getStatus(ignored)
-
-        if clean:
-            # By default, Eden's getStatus() will not return "clean" files.
-            # Without any sort of filter, requesting the "clean" files is an
-            # O(repo) operation, which we will not support.
-            #
-            # Note that remove() specifies clean=True with a matcher, which is
-            # why we care about this use case. For now, we are doing
-            # post-processing with the matching here on the client, but
-            # ultimately, it would be best if this could be done on the server.
-            if not match or match.always():
-                raise Exception('Cannot request clean=True with no filter.')
-
-            # For every file in matches that is not in edenstatus, assume that
-            # it belongs in edenstatus.clean.
-            classified_files = set(
-                edenstatus.modified + edenstatus.added + edenstatus.removed +
-                edenstatus.deleted + edenstatus.unknown + edenstatus.ignored
-            )
-            matches = self.matches(match)
-            clean_files = []
-            for filename in matches:
-                if filename not in classified_files:
-                    clean_files.append(filename)
-            edenstatus.clean = clean_files
-
-        def ismissing(fn):
-            if fn in edenstatus.deleted or fn in edenstatus.removed:
-                return True
-            dirpath = fn + '/'
-            for d in edenstatus.deleted:
-                if d.startswith(dirpath):
-                    return True
-            for d in edenstatus.removed:
-                if d.startswith(dirpath):
-                    return True
-            return False
-
-        # Process all explicit patterns in the match, and call match.bad()
-        # or match.explicitdir() if necessary
-        for fn in sorted(match.files()):
+        for path in sorted(match.files()):
             try:
-                mode = os.lstat(os.path.join(self._root, fn)).st_mode
-                if stat.S_IFMT(mode) == stat.S_IFDIR:
+                if path in results1 or path in results2:
+                    continue
+                mode = os.lstat(os.path.join(self._root, path)).st_mode
+                if stat.S_ISDIR(mode):
                     if match.explicitdir:
-                        match.explicitdir(fn)
+                        match.explicitdir(path)
+                elif stat.S_ISREG(mode) or stat.S_ISREG(mode):
+                    explicit_matches[path] = mode
             except OSError as ex:
                 # Check to see if this refers to a removed file or directory.
                 # Call match.bad() otherwise
-                #
-                # TODO: We might be able to do this check more efficiently
-                # if we merged it with some of the code in
-                # EdenThriftClient.getStatus()
-                if not ismissing(fn):
-                    match.bad(fn, encoding.strtolocal(ex.strerror))
+                if self._ismissing(path):
+                    explicit_matches[path] = None
+                else:
+                    match.bad(path, encoding.strtolocal(ex.strerror))
+
+        return explicit_matches
+
+    def _ismissing(self, path):
+        '''
+        Check to see if this path refers to a deleted file that mercurial
+        knows about but that no longer exists on disk.
+        '''
+        # Check to see if the parent commit knows about this path
+        parent_mf = self._p1_ctx().manifest()
+        if parent_mf.hasdir(path):
+            return True
+
+        # Check to see if the non-normal files list knows about this path
+        # or any child of this path as a directory name.
+        # (This handles the case where an untracked file was added with
+        # 'hg add' but then deleted from disk.)
+        if path in self._map._map:
+            return True
+
+        dirpath = path + '/'
+        for entry in self._map._map:
+            if entry.startswith(dirpath):
+                return True
+
+        return False
+
+    def status(self, match, subrepos, ignored, clean, unknown):  # override
+        edenstatus = self.eden_client.getStatus(
+            self.p1(), list_ignored=ignored
+        ).entries
+
+        nonnormal_copy = self._map.create_clone_of_internal_map()
+
+        # If the caller also wanted us to return clean files,
+        # find all matching files from the current commit manifest.
+        # If they are not in the eden status results or the dirstate
+        # non-normal list then they must be clean.
+        clean_files = []
+        if clean:
+            for path in self._parent_commit_matches(match):
+                if path not in edenstatus and path not in nonnormal_copy:
+                    clean_files.append(path)
+
+        # Store local variables for the status states, so they are cheaper
+        # to access in the loop below.  (It's somewhat unfortunate that python
+        # make this necessary.)
+        MODIFIED = ScmFileStatus.MODIFIED
+        REMOVED = ScmFileStatus.REMOVED
+        ADDED = ScmFileStatus.ADDED
+        IGNORED = ScmFileStatus.IGNORED
+
+        # Process the modified file list returned by Eden.
+        # We must merge it with our list of non-normal files to compute
+        # the removed/added lists correctly.
+        modified_files = []
+        added_files = []
+        removed_files = []
+        deleted_files = []
+        unknown_files = []
+        ignored_files = []
+        for path, code in edenstatus.iteritems():
+            if not match(path):
+                continue
+
+            if code == MODIFIED:
+                # It is possible that the user can mark a file for removal, but
+                # then modify it. If it is marked for removal, it should be
+                # reported as such by `hg status` even though it is still on
+                # disk.
+                dirstate = nonnormal_copy.pop(path, None)
+                if dirstate and dirstate[0] == 'r':
+                    removed_files.append(path)
+                else:
+                    modified_files.append(path)
+            elif code == REMOVED:
+                # If the file no longer exits, we must check to see whether the
+                # user explicitly marked it for removal.
+                dirstate = nonnormal_copy.pop(path, None)
+                if dirstate and dirstate[0] == 'r':
+                    removed_files.append(path)
+                else:
+                    deleted_files.append(path)
+            elif code == ADDED:
+                dirstate = nonnormal_copy.pop(path, None)
+                if dirstate:
+                    state = dirstate[0]
+                    if state == 'a' or (
+                        state == 'n' and dirstate[2] == MERGE_STATE_OTHER_PARENT
+                    ):
+                        added_files.append(path)
+                    else:
+                        unknown_files.append(path)
+                else:
+                    unknown_files.append(path)
+            elif code == IGNORED:
+                # Although Eden may think the file should be ignored as per
+                # .gitignore, it is possible the user has overridden that
+                # default behavior by marking it for addition.
+                dirstate = nonnormal_copy.pop(path, None)
+                if dirstate and dirstate[0] == 'a':
+                    added_files.append(path)
+                else:
+                    ignored_files.append(path)
+            else:
+                raise Exception('Unexpected status code: %s' % code)
+
+        # Process any remaining files in our non-normal set that were
+        # not reported as modified by Eden.
+        for path, entry in nonnormal_copy.iteritems():
+            if not match(path):
+                continue
+
+            state = entry[0]
+            if state == 'm':
+                if entry[2] == 0:
+                    self._ui.warn(
+                        'Unexpected Nonnormal file ' + path + ' has a '
+                        'merge state of NotApplicable while its has been '
+                        'marked as "needs merging".'
+                    )
+                else:
+                    modified_files.append(path)
+            elif state == 'a':
+                try:
+                    mode = os.lstat(os.path.join(self._root, path)).st_mode
+                    if stat.S_ISREG(mode) or stat.S_ISLNK(mode):
+                        added_files.append(path)
+                    else:
+                        deleted_files.append(path)
+                except OSError:
+                    deleted_files.append(path)
+            elif state == 'r':
+                removed_files.append(path)
+
+        # Invoked the match callback functions.
+        explicit_matches = self._call_match_callbacks(
+            match, edenstatus, nonnormal_copy
+        )
+        for path in explicit_matches:
+            # Explicit matches that aren't already present in our results
+            # were either skipped because they are ignored or they are clean.
+            # Check to figure out which is the case.
+            if clean:
+                ignored_files.append(path)
+            elif path in self._p1_ctx():
+                clean_files.append(path)
+            else:
+                ignored_files.append(path)
 
         status = scmutil.status(
-            [f for f in edenstatus.modified if match(f)],
-            [f for f in edenstatus.added if match(f)],
-            [f for f in edenstatus.removed if match(f)],
-            [f for f in edenstatus.deleted if match(f)],
-            [f for f in edenstatus.unknown if match(f)],
-            [f for f in edenstatus.ignored if match(f)],
-            [f for f in edenstatus.clean if match(f)],
+            modified_files,
+            added_files,
+            removed_files,
+            deleted_files,
+            unknown_files,
+            ignored_files,
+            clean_files,
         )
 
-        return (unsure, status)
-
-    def _getStatus(self, list_ignored):
-        return self.eden_client.getStatus(list_ignored, self._map, self._ui)
+        # We should never have any files we are unsure about
+        unsure_files = []
+        return (unsure_files, status)
 
     def _parent_commit_matches(self, match):
-        parent_ctx = self._map._repo[self.p1()]
-
         # Wrap match.bad()
         # We don't want to complain about paths that do not exist in the parent
         # commit but do exist in our non-normal files.
@@ -296,11 +435,11 @@ class eden_dirstate(dirstate.dirstate):
             return
 
         m = matchmod.badmatch(match, bad)
-        return set(parent_ctx.matches(m))
+        return self._p1_ctx().matches(m)
 
     def matches(self, match):  # override
         # Call matches() on the current working directory parent commit
-        results = self._parent_commit_matches(match)
+        results = set(self._parent_commit_matches(match))
 
         # Augument the results with anything modified in the dirstate,
         # to take care of added/removed files.
@@ -315,7 +454,7 @@ class eden_dirstate(dirstate.dirstate):
         Behaves like matches(), but excludes files that have been removed from
         the dirstate.
         '''
-        results = self._parent_commit_matches(match)
+        results = set(self._parent_commit_matches(match))
 
         # Augument the results with anything modified in the dirstate,
         # to take care of added/removed files.
