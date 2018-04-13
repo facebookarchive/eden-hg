@@ -25,7 +25,7 @@ from six import iteritems
 archive_root = os.path.normpath(os.path.join(__file__, '../../..'))
 sys.path.insert(0, archive_root)
 
-from mercurial import (error, extensions, hg, localrepo, util)
+from mercurial import (cmdutil, error, extensions, hg, localrepo, util)
 from mercurial import merge as mergemod
 from mercurial.i18n import _
 from mercurial import match as matchmod
@@ -55,6 +55,7 @@ def extsetup(ui):
     extensions.wrapfunction(orig, 'func', wrapdirstate)
     extensions.wrapfunction(matchmod, 'match', wrap_match)
     extensions.wrapfunction(matchmod, 'exact', wrap_match_exact)
+    extensions.wrapfunction(cmdutil, 'files', wrap_cmdutil_files)
     orig.paths = ()
 
     _repoclass._basesupported.add(constants.requirement)
@@ -537,3 +538,30 @@ def wrap_match_exact(orig, root, cwd, files, badfn=None):
         root, cwd, exact=True, patterns=patterns, includes=[], excludes=[]
     )
     return res
+
+
+def wrap_cmdutil_files(orig, ui, ctx, m, fm, fmt, subrepos):
+    # We only want to replace the behavior when showing files in the current
+    # working directory state.  If showing files from a specific revision
+    # use the original cmdutil.files() behavior.
+    if ctx.rev() is not None:
+        return orig(ui, ctx, m, fm, fmt, subrepos)
+
+    # The default cmdutil.files() code looks up the dirstate entry for ever
+    # single matched file.  This is unnecessary in most cases, and will trigger
+    # a lot of thrift calls to Eden.  We have augmented the Eden dirstate with
+    # a function that can return only non-removed files without requiring
+    # looking up every single match.
+
+    ret = 1
+    ds = ctx.repo().dirstate
+    for f in sorted(ds.non_removed_matches(m)):
+        fm.startitem()
+        if ui.verbose:
+            fc = ctx[f]
+            fm.write('size flags', '% 10d % 1s ', fc.size(), fc.flags())
+        fm.data(abspath=f)
+        fm.write('path', fmt, m.rel(f))
+        ret = 0
+
+    return ret

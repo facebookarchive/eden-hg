@@ -251,8 +251,7 @@ class eden_dirstate(dirstate.dirstate):
     def _getStatus(self, list_ignored):
         return self.eden_client.getStatus(list_ignored, self._map, self._ui)
 
-    def matches(self, match):  # override
-        # Call matches() on the current working directory parent commit
+    def _parent_commit_matches(self, match):
         parent_ctx = self._map._repo[self.p1()]
 
         # Wrap match.bad()
@@ -265,13 +264,35 @@ class eden_dirstate(dirstate.dirstate):
             return
 
         m = matchmod.badmatch(match, bad)
-        results = set(parent_ctx.matches(m))
+        return set(parent_ctx.matches(m))
+
+    def matches(self, match):  # override
+        # Call matches() on the current working directory parent commit
+        results = self._parent_commit_matches(match)
 
         # Augument the results with anything modified in the dirstate,
         # to take care of added/removed files.
         for path in self._map._map.keys():
             if match(path):
                 results.add(path)
+
+        return results
+
+    def non_removed_matches(self, match):  # override
+        '''
+        Behaves like matches(), but excludes files that have been removed from
+        the dirstate.
+        '''
+        results = self._parent_commit_matches(match)
+
+        # Augument the results with anything modified in the dirstate,
+        # to take care of added/removed files.
+        for path, state in self._map._map.items():
+            if match(path):
+                if state[0] == 'r':
+                    results.discard(path)
+                else:
+                    results.add(path)
 
         return results
 
