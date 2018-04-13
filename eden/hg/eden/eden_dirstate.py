@@ -10,6 +10,7 @@ from __future__ import division
 from __future__ import print_function
 
 from mercurial import dirstate, policy, scmutil, sparse as sparsemod, util
+from mercurial import match as matchmod
 from mercurial.node import nullid
 from . import EdenThriftClient as thrift
 from . import eden_dirstate_map as eden_dirstate_map
@@ -251,9 +252,28 @@ class eden_dirstate(dirstate.dirstate):
         return self.eden_client.getStatus(list_ignored, self._map, self._ui)
 
     def matches(self, match):  # override
-        return self._eden_walk_helper(
-            match, deleted=False, unknown=False, ignored=False
-        )
+        # Call matches() on the current working directory parent commit
+        parent_ctx = self._map._repo[self.p1()]
+
+        # Wrap match.bad()
+        # We don't want to complain about paths that do not exist in the parent
+        # commit but do exist in our non-normal files.
+        #
+        # However, the default mercurial dirstate.matches() code never invokes
+        # bad() at all, so lets just ignore all bad() calls entirely.
+        def bad(fn, msg):
+            return
+
+        m = matchmod.badmatch(match, bad)
+        results = set(parent_ctx.matches(m))
+
+        # Augument the results with anything modified in the dirstate,
+        # to take care of added/removed files.
+        for path in self._map._map.keys():
+            if match(path):
+                results.add(path)
+
+        return results
 
     def rebuild(self, parent, allfiles, changedfiles=None):
         # Ignore the input allfiles parameter, and always rebuild with
