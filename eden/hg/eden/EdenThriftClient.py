@@ -71,6 +71,18 @@ class EdenThriftClient(object):
         self._repo = repo
         self._root = repo.root
 
+        self._socket_path = os.readlink(
+            os.path.join(self._root, '.eden', 'socket')
+        )
+        # Read the .eden/root symlink to see what eden thinks the name of this
+        # mount point is.  This might not match self._root in some cases.  In
+        # particular, a parent directory of the eden mount might be bind
+        # mounted somewhere else, resulting in it appearing at multiple
+        # separate locations.
+        self._eden_root = os.readlink(
+            os.path.join(self._root, '.eden', 'root')
+        )
+
     def _get_client(self):
         '''
         Create a new client instance for each call because we may be idle
@@ -80,11 +92,11 @@ class EdenThriftClient(object):
         reconnect on transport failure, but for the moment this strategy
         is a reasonable compromise.
         '''
-        return create_thrift_client(mounted_path=self._root)
+        return create_thrift_client(socket_path=self._socket_path)
 
     def getManifestEntry(self, relativePath):
         with self._get_client() as client:
-            return client.getManifestEntry(self._root, relativePath)
+            return client.getManifestEntry(self._eden_root, relativePath)
 
     def setHgParents(self, p1, p2):
         if p2 == node.nullid:
@@ -94,13 +106,13 @@ class EdenThriftClient(object):
 
         parents = eden_ttypes.WorkingDirectoryParents(parent1=p1, parent2=p2)
         with self._get_client() as client:
-            client.resetParentCommits(self._root, parents)
+            client.resetParentCommits(self._eden_root, parents)
 
     def getStatus(self, parent, list_ignored):  # noqa: C901
         # type(str, bool) -> Dict[str, int]
         with self._get_client() as client:
             return client.getScmStatus(
-                self._root,
+                self._eden_root,
                 list_ignored,
                 parent,
             )
@@ -108,15 +120,15 @@ class EdenThriftClient(object):
     def checkout(self, node, checkout_mode):
         self._flushPendingTransactions()
         with self._get_client() as client:
-            return client.checkOutRevision(self._root, node, checkout_mode)
+            return client.checkOutRevision(self._eden_root, node, checkout_mode)
 
     def glob(self, globs):
         with self._get_client() as client:
-            return client.glob(self._root, globs)
+            return client.glob(self._eden_root, globs)
 
     def getFileInformation(self, files):
         with self._get_client() as client:
-            return client.getFileInformation(self._root, files)
+            return client.getFileInformation(self._eden_root, files)
 
     def _flushPendingTransactions(self):
         # If a transaction is currently in progress, make sure it has flushed
