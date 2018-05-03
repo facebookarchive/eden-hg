@@ -467,7 +467,7 @@ class eden_dirstate(dirstate.dirstate):
 
         return results
 
-    def rebuild(self, parent, allfiles, changedfiles=None):
+    def rebuild(self, parent, allfiles, changedfiles=None, exact=False):
         # Ignore the input allfiles parameter, and always rebuild with
         # an empty allfiles list.
         #
@@ -475,7 +475,8 @@ class eden_dirstate(dirstate.dirstate):
         # We only track merge state and added/removed status in the python
         # dirstate code.
         super(eden_dirstate, self).rebuild(parent, allfiles=[],
-                                           changedfiles=changedfiles)
+                                           changedfiles=changedfiles,
+                                           exact=exact)
 
     def normallookup(self, f):  # override
         '''Mark a file normal, but possibly dirty.'''
