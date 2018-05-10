@@ -4,18 +4,18 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2.
 
-'''Eden implementation for the dirstatemap class.'''
+"""Eden implementation for the dirstatemap class."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import errno
+
+import eden.dirstate
 from mercurial import dirstate, util
 from six import iteritems
+
 from . import EdenThriftClient as thrift
-import eden.dirstate
+
 
 MERGE_STATE_NOT_APPLICABLE = eden.dirstate.MERGE_STATE_NOT_APPLICABLE
 MERGE_STATE_BOTH_PARENTS = eden.dirstate.MERGE_STATE_BOTH_PARENTS
@@ -24,6 +24,7 @@ DUMMY_MTIME = 0
 
 
 class eden_dirstate_map(dirstate.dirstatemap):
+
     def __init__(self, ui, opener, root, thrift_client, repo):
         # type(eden_dirstate_map, ui, opener, str, EdenThriftClient) -> None
         super(eden_dirstate_map, self).__init__(ui, opener, root)
@@ -46,7 +47,7 @@ class eden_dirstate_map(dirstate.dirstatemap):
         # never allow these to be inserted into self._map in the first place.)
         to_remove = []
         for path, v in iteritems(self._map):
-            if v[0] == 'n' and v[2] == MERGE_STATE_NOT_APPLICABLE:
+            if v[0] == "n" and v[2] == MERGE_STATE_NOT_APPLICABLE:
                 to_remove.append(path)
         for path in to_remove:
             self._map.pop(path)
@@ -58,9 +59,7 @@ class eden_dirstate_map(dirstate.dirstatemap):
 
     def read(self):  # override
         # ignore HG_PENDING because identity is used only for writing
-        self.identity = util.filestat.frompath(
-            self._opener.join(self._filename)
-        )
+        self.identity = util.filestat.frompath(self._opener.join(self._filename))
 
         try:
             fp = self._opendirstatefile()
@@ -84,16 +83,16 @@ class eden_dirstate_map(dirstate.dirstatemap):
         self.copymap = copymap
 
     def iteritems(self):
-        raise Exception('Should not invoke iteritems() on eden_dirstate_map!')
+        raise Exception("Should not invoke iteritems() on eden_dirstate_map!")
 
     def __len__(self):
-        raise Exception('Should not invoke __len__ on eden_dirstate_map!')
+        raise Exception("Should not invoke __len__ on eden_dirstate_map!")
 
     def __iter__(self):
-        raise Exception('Should not invoke __iter__ on eden_dirstate_map!')
+        raise Exception("Should not invoke __iter__ on eden_dirstate_map!")
 
     def keys(self):
-        raise Exception('Should not invoke keys() on eden_dirstate_map!')
+        raise Exception("Should not invoke keys() on eden_dirstate_map!")
 
     def get(self, key, default=None):
         try:
@@ -120,17 +119,14 @@ class eden_dirstate_map(dirstate.dirstatemap):
         # Because we know the Thrift call will fail, we throw the corresponding
         # KeyError in this case to avoid the overhead of the Thrift call as a
         # performance optimization.
-        if filename == '.hgsub' or filename == '.hgsubstate':
+        if filename == ".hgsub" or filename == ".hgsubstate":
             raise KeyError(filename)
 
         try:
             # TODO: Consider fetching this from the commit context rather than
             # querying Eden for this information.
             manifest_entry = self._thrift_client.getManifestEntry(filename)
-            return [
-                'n', manifest_entry.mode, MERGE_STATE_NOT_APPLICABLE,
-                DUMMY_MTIME
-            ]
+            return ["n", manifest_entry.mode, MERGE_STATE_NOT_APPLICABLE, DUMMY_MTIME]
         except thrift.NoValueForKeyError as e:
             raise KeyError(e.key)
 
@@ -151,12 +147,12 @@ class eden_dirstate_map(dirstate.dirstatemap):
         self._map[filename] = (state, mode, merge_state)
 
     def nonnormalentries(self):
-        '''Returns a set of filenames.'''
+        """Returns a set of filenames."""
         # type() -> Tuple[Set[str], Set[str]]
         nonnorm = set()
         otherparent = set()
         for path, entry in iteritems(self._map):
-            if entry[0] != 'n':
+            if entry[0] != "n":
                 nonnorm.add(path)
             elif entry[2] == MERGE_STATE_OTHER_PARENT:
                 otherparent.add(path)

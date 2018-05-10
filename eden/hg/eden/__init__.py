@@ -10,31 +10,25 @@
 This overrides the dirstate to check with the eden daemon for modifications,
 instead of doing a normal scan of the filesystem.
 """
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 import os
 import sys
+
+from mercurial import (
+    cmdutil,
+    error,
+    extensions,
+    hg,
+    localrepo,
+    match as matchmod,
+    merge as mergemod,
+    util,
+)
+from mercurial.i18n import _
 from six import iteritems
 
-# Update sys.path so that we can find modules that we need.
-#
-# Our file should be "hgext3rd/eden/__init__.py", inside a directory
-# that also contains the other eden library modules.
-archive_root = os.path.normpath(os.path.join(__file__, '../../..'))
-sys.path.insert(0, archive_root)
-
-from mercurial import (cmdutil, error, extensions, hg, localrepo, util)
-from mercurial import merge as mergemod
-from mercurial.i18n import _
-from mercurial import match as matchmod
-from . import EdenThriftClient as thrift
-from . import constants
-CheckoutMode = thrift.CheckoutMode
-ConflictType = thrift.ConflictType
-
-_repoclass = localrepo.localrepository
+from . import EdenThriftClient as thrift, constants
 
 # Import the "cmdtable" variable from our commands module.
 # Note that this is not unused even though we do not appear to use it:
@@ -43,17 +37,31 @@ _repoclass = localrepo.localrepository
 from .commands import cmdtable  # noqa: F401
 
 
+# Update sys.path so that we can find modules that we need.
+#
+# Our file should be "hgext3rd/eden/__init__.py", inside a directory
+# that also contains the other eden library modules.
+archive_root = os.path.normpath(os.path.join(__file__, "../../.."))
+sys.path.insert(0, archive_root)
+
+
+CheckoutMode = thrift.CheckoutMode
+ConflictType = thrift.ConflictType
+
+_repoclass = localrepo.localrepository
+
+
 def extsetup(ui):
     orig = localrepo.localrepository.dirstate
     # For some reason, localrepository.invalidatedirstate() does not call
     # dirstate.invalidate() by default, so we must wrap it.
     extensions.wrapfunction(
-        localrepo.localrepository, 'invalidatedirstate', invalidatedirstate
+        localrepo.localrepository, "invalidatedirstate", invalidatedirstate
     )
-    extensions.wrapfunction(mergemod, 'update', merge_update)
-    extensions.wrapfunction(hg, '_showstats', update_showstats)
-    extensions.wrapfunction(orig, 'func', wrapdirstate)
-    extensions.wrapfunction(cmdutil, 'files', wrap_cmdutil_files)
+    extensions.wrapfunction(mergemod, "update", merge_update)
+    extensions.wrapfunction(hg, "_showstats", update_showstats)
+    extensions.wrapfunction(orig, "func", wrapdirstate)
+    extensions.wrapfunction(cmdutil, "files", wrap_cmdutil_files)
     orig.paths = ()
 
     _repoclass._basesupported.add(constants.requirement)
@@ -85,20 +93,17 @@ def merge_update(
     matcher=None,
     mergeforce=False,
     updatecheck=None,
-    wc=None
+    wc=None,
 ):
-    '''Apparently node can be a 20-byte hash or an integer referencing a
+    """Apparently node can be a 20-byte hash or an integer referencing a
     revision number.
-    '''
+    """
     assert node is not None
 
-    if not util.safehasattr(repo.dirstate, 'eden_client'):
-        why_not_eden = 'This is not an eden repository.'
+    if not util.safehasattr(repo.dirstate, "eden_client"):
+        why_not_eden = "This is not an eden repository."
     elif matcher is not None and not matcher.always():
-        why_not_eden = (
-            'We don\'t support doing a partial update through '
-            'eden yet.'
-        )
+        why_not_eden = ("We don't support doing a partial update through " "eden yet.")
     elif branchmerge:
         # TODO: We potentially should support handling this scenario ourself in
         # the future.  For now we simply haven't investigated what the correct
@@ -108,12 +113,12 @@ def merge_update(
         # TODO: We potentially should support handling this scenario ourself in
         # the future.  For now we simply haven't investigated what the correct
         # semantics are in this case.
-        why_not_eden = 'ancestor is not None: %s.' % ancestor
+        why_not_eden = "ancestor is not None: %s." % ancestor
     elif wc is not None and wc.isinmemory():
         # In memory merges do not operate on the working directory,
         # so we don't need to ask eden to change the working directory state
         # at all, and can use the vanilla merge logic in this case.
-        why_not_eden = 'merge is in-memory'
+        why_not_eden = "merge is in-memory"
     else:
         # TODO: We probably also need to set why_not_eden if there are
         # subrepositories.  (Personally I might vote for just not supporting
@@ -121,9 +126,7 @@ def merge_update(
         why_not_eden = None
 
     if why_not_eden:
-        repo.ui.debug(
-            'falling back to non-eden update code path: %s\n' % why_not_eden
-        )
+        repo.ui.debug("falling back to non-eden update code path: %s\n" % why_not_eden)
         return orig(
             repo,
             node,
@@ -135,10 +138,10 @@ def merge_update(
             matcher=matcher,
             mergeforce=mergeforce,
             updatecheck=updatecheck,
-            wc=wc
+            wc=wc,
         )
     else:
-        repo.ui.debug('using eden update code path\n')
+        repo.ui.debug("using eden update code path\n")
 
     with repo.wlock():
         wctx = repo[None]
@@ -151,10 +154,10 @@ def merge_update(
         if not force:
             # Make sure there isn't an outstanding merge or unresolved files.
             if len(parents) > 1:
-                raise error.Abort(_('outstanding uncommitted merge'))
+                raise error.Abort(_("outstanding uncommitted merge"))
             ms = mergemod.mergestate.read(repo)
             if list(ms.unresolved()):
-                raise error.Abort(_('outstanding merge conflicts'))
+                raise error.Abort(_("outstanding merge conflicts"))
 
             # The vanilla merge code disallows updating between two unrelated
             # branches if the working directory is dirty.  I don't really see a
@@ -165,27 +168,25 @@ def merge_update(
             if p1ctx == destctx:
                 # No update to perform.
                 # Just invoke the hooks and return.
-                repo.hook('preupdate', throw=True, parent1=deststr, parent2='')
-                repo.hook('update', parent1=deststr, parent2='', error=0)
+                repo.hook("preupdate", throw=True, parent1=deststr, parent2="")
+                repo.hook("update", parent1=deststr, parent2="", error=0)
                 return 0, 0, 0, 0
 
             # If we are in noconflict mode, then we must do a DRY_RUN first to
             # see if there are any conflicts that should prevent us from
             # attempting the update.
-            if updatecheck == 'noconflict':
+            if updatecheck == "noconflict":
                 conflicts = repo.dirstate.eden_client.checkout(
                     destctx.node(), CheckoutMode.DRY_RUN
                 )
                 if conflicts:
-                    actions = _determine_actions_for_conflicts(
-                        repo, p1ctx, conflicts
-                    )
+                    actions = _determine_actions_for_conflicts(repo, p1ctx, conflicts)
                     _check_actions_and_raise_if_there_are_conflicts(actions)
 
         # Invoke the preupdate hook
-        repo.hook('preupdate', throw=True, parent1=deststr, parent2='')
+        repo.hook("preupdate", throw=True, parent1=deststr, parent2="")
         # Record that we're in the middle of an update
-        repo.vfs.write('updatestate', destctx.hex())
+        repo.vfs.write("updatestate", destctx.hex())
 
         # Ask eden to perform the checkout
         if force:
@@ -199,8 +200,7 @@ def merge_update(
             # We do still need to make sure to update the merge state though.
             # In the non-force code path the merge state is updated in
             # _handle_update_conflicts().
-            ms = mergemod.mergestate.clean(repo, p1ctx.node(), destctx.node(),
-                                           labels)
+            ms = mergemod.mergestate.clean(repo, p1ctx.node(), destctx.node(), labels)
             ms.commit()
 
             stats = 0, 0, 0, 0
@@ -231,10 +231,10 @@ def merge_update(
             mergemod.recordupdates(repo, actions, branchmerge)
 
             # Clear the update state
-            util.unlink(repo.vfs.join('updatestate'))
+            util.unlink(repo.vfs.join("updatestate"))
 
     # Invoke the update hook
-    repo.hook('update', parent1=deststr, parent2='', error=stats[3])
+    repo.hook("update", parent1=deststr, parent2="", error=stats[3])
 
     return stats
 
@@ -246,10 +246,10 @@ def update_showstats(orig, repo, stats, quietempty=False):
     (updated, merged, removed, unresolved) = stats
     if merged or unresolved:
         repo.ui.status(
-            _('%d files merged, %d files unresolved\n') % (merged, unresolved)
+            _("%d files merged, %d files unresolved\n") % (merged, unresolved)
         )
     elif not quietempty:
-        repo.ui.status(_('update complete\n'))
+        repo.ui.status(_("update complete\n"))
 
 
 def _handle_update_conflicts(repo, wctx, src, dest, labels, conflicts, force):
@@ -270,25 +270,25 @@ def _handle_update_conflicts(repo, wctx, src, dest, labels, conflicts, force):
 
 
 def _determine_actions_for_conflicts(repo, src, conflicts):
-    '''Calculate the actions for _applyupdates().'''
+    """Calculate the actions for _applyupdates()."""
     # Build a list of actions to pass to mergemod.applyupdates()
     actions = dict(
         (m, [])
         for m in [
-            'a',
-            'am',
-            'cd',
-            'dc',
-            'dg',
-            'dm',
-            'e',
-            'f',
-            'g',  # create or modify
-            'k',
-            'm',
-            'p',  # path conflicts
-            'pr',  # files to rename
-            'r',
+            "a",
+            "am",
+            "cd",
+            "dc",
+            "dg",
+            "dm",
+            "e",
+            "f",
+            "g",  # create or modify
+            "k",
+            "m",
+            "p",  # path conflicts
+            "pr",  # files to rename
+            "r",
         ]
     )
 
@@ -301,12 +301,11 @@ def _determine_actions_for_conflicts(repo, src, conflicts):
             # We will report the error, but the file will show modified in
             # the working directory status after the update returns.
             repo.ui.write_err(
-                _('error updating %s: %s\n') %
-                (conflict.path, conflict.message)
+                _("error updating %s: %s\n") % (conflict.path, conflict.message)
             )
             continue
         elif conflict.type == ConflictType.MODIFIED_REMOVED:
-            action_type = 'cd'
+            action_type = "cd"
             action = (conflict.path, None, conflict.path, False, src.node())
             prompt = "prompt changed/deleted"
         elif conflict.type == ConflictType.UNTRACKED_ADDED:
@@ -316,11 +315,11 @@ def _determine_actions_for_conflicts(repo, src, conflicts):
             # manifestmerge(), which is the other possibility when the file
             # does not exist in the manifest of the common ancestor for the
             # merge.
-            action_type = 'm'
+            action_type = "m"
             action = (conflict.path, conflict.path, None, False, src.node())
-            prompt = 'both created'
+            prompt = "both created"
         elif conflict.type == ConflictType.REMOVED_MODIFIED:
-            action_type = 'dc'
+            action_type = "dc"
             action = (None, conflict.path, conflict.path, False, src.node())
             prompt = "prompt deleted/changed"
         elif conflict.type == ConflictType.MISSING_REMOVED:
@@ -329,10 +328,8 @@ def _determine_actions_for_conflicts(repo, src, conflicts):
             # in the new commit.
             continue
         elif conflict.type == ConflictType.MODIFIED_MODIFIED:
-            action_type = 'm'
-            action = (
-                conflict.path, conflict.path, conflict.path, False, src.node()
-            )
+            action_type = "m"
+            action = (conflict.path, conflict.path, conflict.path, False, src.node())
             prompt = "versions differ"
         elif conflict.type == ConflictType.DIRECTORY_NOT_EMPTY:
             # This is a file in a directory that Eden would have normally
@@ -341,8 +338,8 @@ def _determine_actions_for_conflicts(repo, src, conflicts):
             continue
         else:
             raise Exception(
-                'unknown conflict type received from eden: '
-                '%r, %r, %r' % (conflict.type, conflict.path, conflict.message)
+                "unknown conflict type received from eden: "
+                "%r, %r, %r" % (conflict.type, conflict.path, conflict.message)
             )
 
         actions[action_type].append((conflict.path, action, prompt))
@@ -356,7 +353,7 @@ def _check_actions_and_raise_if_there_are_conflicts(actions):
     for action_type, list_of_tuples in iteritems(actions):
         if len(list_of_tuples) == 0:
             continue  # Note `actions` defaults to [] for all keys.
-        if action_type not in ('g', 'k', 'e', 'r', 'pr'):
+        if action_type not in ("g", "k", "e", "r", "pr"):
             conflict_paths.extend(t[0] for t in list_of_tuples)
 
     # Report the exact files with conflicts.
@@ -371,11 +368,10 @@ def _check_actions_and_raise_if_there_are_conflicts(actions):
             # If there are more than 10 conflicts, show the first 9
             # and make the last line report how many other conflicts there are
             total_conflicts = len(conflict_paths)
-            conflict_paths = conflict_paths[:max_to_show - 1]
+            conflict_paths = conflict_paths[: max_to_show - 1]
             num_remaining = total_conflicts - len(conflict_paths)
-            conflict_paths.append('... (%d more conflicts)' % num_remaining)
-        msg = (_("conflicting changes:\n  ") +
-               "\n  ".join(conflict_paths))
+            conflict_paths.append("... (%d more conflicts)" % num_remaining)
+        msg = (_("conflicting changes:\n  ") + "\n  ".join(conflict_paths))
         hint = _("commit or update --clean to discard changes")
         raise error.Abort(msg, hint=hint)
 
@@ -403,6 +399,7 @@ def wrapdirstate(orig, repo):
         return orig(repo)
     else:
         from . import eden_dirstate as dirstate_reimplementation
+
         return dirstate_reimplementation.eden_dirstate(repo, repo.ui, repo.root)
 
 
@@ -425,9 +422,9 @@ def wrap_cmdutil_files(orig, ui, ctx, m, fm, fmt, subrepos):
         fm.startitem()
         if ui.verbose:
             fc = ctx[f]
-            fm.write('size flags', '% 10d % 1s ', fc.size(), fc.flags())
+            fm.write("size flags", "% 10d % 1s ", fc.size(), fc.flags())
         fm.data(abspath=f)
-        fm.write('path', fmt, m.rel(f))
+        fm.write("path", fmt, m.rel(f))
         ret = 0
 
     return ret

@@ -5,30 +5,35 @@
 # This software may be used and distributed according to the terms of the
 # GNU General Public License version 2.
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
+import errno
+import os
+import stat
+
+from eden.dirstate import MERGE_STATE_BOTH_PARENTS, MERGE_STATE_OTHER_PARENT
 from mercurial import (
-    dirstate, encoding, match as matchmod, policy, scmutil,
-    sparse as sparsemod, util
+    dirstate,
+    encoding,
+    match as matchmod,
+    policy,
+    scmutil,
+    sparse as sparsemod,
+    util,
 )
 from mercurial.node import nullid
-from . import EdenThriftClient as thrift
-from .EdenThriftClient import ScmFileStatus
-from . import eden_dirstate_map as eden_dirstate_map
-from eden.dirstate import (MERGE_STATE_BOTH_PARENTS, MERGE_STATE_OTHER_PARENT)
-import errno
-import stat
-import os
 
-parsers = policy.importmod('parsers')
+from . import EdenThriftClient as thrift, eden_dirstate_map as eden_dirstate_map
+from .EdenThriftClient import ScmFileStatus
+
+
+parsers = policy.importmod("parsers")
 propertycache = util.propertycache
 
 
 class statobject(object):
-    ''' this is a stat-like object to represent information from eden.'''
-    __slots__ = ('st_mode', 'st_size', 'st_mtime')
+    """ this is a stat-like object to represent information from eden."""
+    __slots__ = ("st_mode", "st_size", "st_mtime")
 
     def __init__(self, mode=None, size=None, mtime=None):
         self.st_mode = mode
@@ -37,6 +42,7 @@ class statobject(object):
 
 
 class eden_dirstate(dirstate.dirstate):
+
     def __init__(self, repo, ui, root):
         self.eden_client = thrift.EdenThriftClient(repo)
 
@@ -49,13 +55,14 @@ class eden_dirstate(dirstate.dirstate):
         # dirstate.
         def sparsematchfn():
             return sparsemod.matcher(repo)
-        super(eden_dirstate, self).__init__(opener, ui, root, validate,
-                                            sparsematchfn)
+
+        super(eden_dirstate, self).__init__(opener, ui, root, validate, sparsematchfn)
 
         def create_eden_dirstate(ui, opener, root):
             return eden_dirstate_map.eden_dirstate_map(
                 ui, opener, root, self.eden_client, repo
             )
+
         self._mapcls = create_eden_dirstate
 
     def __iter__(self):
@@ -73,22 +80,22 @@ class eden_dirstate(dirstate.dirstate):
         #
         # We do provide edeniteritems() for users to iterate through only the
         # files explicitly tracked in the eden dirstate.
-        raise NotImplementedError('eden_dirstate.iteritems()')
+        raise NotImplementedError("eden_dirstate.iteritems()")
 
     def dirs(self):  # override
-        raise NotImplementedError('eden_dirstate.dirs()')
+        raise NotImplementedError("eden_dirstate.dirs()")
 
     def edeniteritems(self):
-        '''
+        """
         Walk over all items tracked in the eden dirstate.
 
         This includes non-normal files (e.g., files marked for addition or
         removal), as well as normal files that have merge state information.
-        '''
+        """
         return self._map._map.iteritems()
 
     def _p1_ctx(self):
-        '''Return the context object for the first parent commit.'''
+        """Return the context object for the first parent commit."""
         return self._map._repo.unfiltered()[self.p1()]
 
     # Code paths that invoke dirstate.walk()
@@ -142,17 +149,15 @@ class eden_dirstate(dirstate.dirstate):
     #   - we potentially should just implement purge inside Eden
     #
     def walk(self, match, subrepos, unknown, ignored, full=True):  # override
-        '''
+        """
         Walk recursively through the directory tree, finding all files
         matched by match.
 
         If full is False, maybe skip some known-clean files.
 
         Return a dict mapping filename to stat-like object
-        '''
-        edenstatus = self.eden_client.getStatus(
-            self.p1(), list_ignored=ignored
-        ).entries
+        """
+        edenstatus = self.eden_client.getStatus(self.p1(), list_ignored=ignored).entries
 
         nonnormal = self._map._map
 
@@ -194,7 +199,7 @@ class eden_dirstate(dirstate.dirstate):
             elif code == REMOVED:
                 results[path] = None
             else:
-                raise Exception('Unexpected status code: %s' % code)
+                raise Exception("Unexpected status code: %s" % code)
 
         for path, entry in nonnormal.iteritems():
             if path in results:
@@ -208,9 +213,9 @@ class eden_dirstate(dirstate.dirstate):
             for path, flags in parent_mf.matches(match).iteritems():
                 if path in edenstatus or path in nonnormal:
                     continue
-                if flags == 'l':
+                if flags == "l":
                     mode = (stat.S_IFLNK | 0o777)
-                elif flags == 'x':
+                elif flags == "x":
                     mode = (stat.S_IFREG | 0o755)
                 else:
                     mode = (stat.S_IFREG | 0o644)
@@ -228,14 +233,14 @@ class eden_dirstate(dirstate.dirstate):
         return results
 
     def _call_match_callbacks(self, match, results1, results2):
-        '''
+        """
         Process all explicit patterns in the match, and call match.bad()
         or match.explicitdir() if necessary
 
         Returns a dictionary of (path -> mode) for all explicit matches that
         are not already present in the results.  The mode will be None if the
         path does not exist on disk.
-        '''
+        """
         # TODO: We do not currently invoke match.traversedir
         # This is currently only used by `hg purge`, which uses it to remove
         # empty directories.
@@ -264,10 +269,10 @@ class eden_dirstate(dirstate.dirstate):
         return explicit_matches
 
     def _ismissing(self, path):
-        '''
+        """
         Check to see if this path refers to a deleted file that mercurial
         knows about but that no longer exists on disk.
-        '''
+        """
         # Check to see if the parent commit knows about this path
         parent_mf = self._p1_ctx().manifest()
         if parent_mf.hasdir(path):
@@ -280,7 +285,7 @@ class eden_dirstate(dirstate.dirstate):
         if path in self._map._map:
             return True
 
-        dirpath = path + '/'
+        dirpath = path + "/"
         for entry in self._map._map:
             if entry.startswith(dirpath):
                 return True
@@ -288,9 +293,7 @@ class eden_dirstate(dirstate.dirstate):
         return False
 
     def status(self, match, subrepos, ignored, clean, unknown):  # override
-        edenstatus = self.eden_client.getStatus(
-            self.p1(), list_ignored=ignored
-        ).entries
+        edenstatus = self.eden_client.getStatus(self.p1(), list_ignored=ignored).entries
 
         nonnormal_copy = self._map.create_clone_of_internal_map()
 
@@ -331,7 +334,7 @@ class eden_dirstate(dirstate.dirstate):
                 # reported as such by `hg status` even though it is still on
                 # disk.
                 dirstate = nonnormal_copy.pop(path, None)
-                if dirstate and dirstate[0] == 'r':
+                if dirstate and dirstate[0] == "r":
                     removed_files.append(path)
                 else:
                     modified_files.append(path)
@@ -339,7 +342,7 @@ class eden_dirstate(dirstate.dirstate):
                 # If the file no longer exits, we must check to see whether the
                 # user explicitly marked it for removal.
                 dirstate = nonnormal_copy.pop(path, None)
-                if dirstate and dirstate[0] == 'r':
+                if dirstate and dirstate[0] == "r":
                     removed_files.append(path)
                 else:
                     deleted_files.append(path)
@@ -347,8 +350,9 @@ class eden_dirstate(dirstate.dirstate):
                 dirstate = nonnormal_copy.pop(path, None)
                 if dirstate:
                     state = dirstate[0]
-                    if state == 'a' or (
-                        state == 'n' and dirstate[2] == MERGE_STATE_OTHER_PARENT
+                    if (
+                        state == "a"
+                        or (state == "n" and dirstate[2] == MERGE_STATE_OTHER_PARENT)
                     ):
                         added_files.append(path)
                     else:
@@ -360,12 +364,12 @@ class eden_dirstate(dirstate.dirstate):
                 # .gitignore, it is possible the user has overridden that
                 # default behavior by marking it for addition.
                 dirstate = nonnormal_copy.pop(path, None)
-                if dirstate and dirstate[0] == 'a':
+                if dirstate and dirstate[0] == "a":
                     added_files.append(path)
                 else:
                     ignored_files.append(path)
             else:
-                raise Exception('Unexpected status code: %s' % code)
+                raise Exception("Unexpected status code: %s" % code)
 
         # Process any remaining files in our non-normal set that were
         # not reported as modified by Eden.
@@ -374,16 +378,16 @@ class eden_dirstate(dirstate.dirstate):
                 continue
 
             state = entry[0]
-            if state == 'm':
+            if state == "m":
                 if entry[2] == 0:
                     self._ui.warn(
-                        'Unexpected Nonnormal file ' + path + ' has a '
-                        'merge state of NotApplicable while its has been '
+                        "Unexpected Nonnormal file " + path + " has a "
+                        "merge state of NotApplicable while its has been "
                         'marked as "needs merging".'
                     )
                 else:
                     modified_files.append(path)
-            elif state == 'a':
+            elif state == "a":
                 try:
                     mode = os.lstat(os.path.join(self._root, path)).st_mode
                     if stat.S_ISREG(mode) or stat.S_ISLNK(mode):
@@ -392,13 +396,11 @@ class eden_dirstate(dirstate.dirstate):
                         deleted_files.append(path)
                 except OSError:
                     deleted_files.append(path)
-            elif state == 'r':
+            elif state == "r":
                 removed_files.append(path)
 
         # Invoked the match callback functions.
-        explicit_matches = self._call_match_callbacks(
-            match, edenstatus, nonnormal_copy
-        )
+        explicit_matches = self._call_match_callbacks(match, edenstatus, nonnormal_copy)
         for path in explicit_matches:
             # Explicit matches that aren't already present in our results
             # were either skipped because they are ignored or they are clean.
@@ -450,17 +452,17 @@ class eden_dirstate(dirstate.dirstate):
         return results
 
     def non_removed_matches(self, match):  # override
-        '''
+        """
         Behaves like matches(), but excludes files that have been removed from
         the dirstate.
-        '''
+        """
         results = set(self._parent_commit_matches(match))
 
         # Augument the results with anything modified in the dirstate,
         # to take care of added/removed files.
         for path, state in self._map._map.items():
             if match(path):
-                if state[0] == 'r':
+                if state[0] == "r":
                     results.discard(path)
                 else:
                     results.add(path)
@@ -474,12 +476,12 @@ class eden_dirstate(dirstate.dirstate):
         # edenfs itself will track the file changes correctly.
         # We only track merge state and added/removed status in the python
         # dirstate code.
-        super(eden_dirstate, self).rebuild(parent, allfiles=[],
-                                           changedfiles=changedfiles,
-                                           exact=exact)
+        super(eden_dirstate, self).rebuild(
+            parent, allfiles=[], changedfiles=changedfiles, exact=exact
+        )
 
     def normallookup(self, f):  # override
-        '''Mark a file normal, but possibly dirty.'''
+        """Mark a file normal, but possibly dirty."""
         if self._pl[1] != nullid:
             # if there is a merge going on and the file was either
             # in state 'm' (-1) or coming from other parent (-2) before
@@ -491,8 +493,12 @@ class eden_dirstate(dirstate.dirstate):
             entry = self._map._map.get(f)
             if entry is not None:
                 status, mode, merge_state = entry
-                if status == 'r' and merge_state in (
-                        MERGE_STATE_BOTH_PARENTS, MERGE_STATE_OTHER_PARENT):
+                if (
+                    status == "r"
+                    and merge_state in (
+                        MERGE_STATE_BOTH_PARENTS, MERGE_STATE_OTHER_PARENT
+                    )
+                ):
                     source = self._map.copymap.get(f)
                     if merge_state == MERGE_STATE_BOTH_PARENTS:
                         self.merge(f)
@@ -501,9 +507,9 @@ class eden_dirstate(dirstate.dirstate):
                     if source:
                         self.copy(source, f)
                     return
-                if status == 'm':
+                if status == "m":
                     return
-                if status == 'n' and merge_state == MERGE_STATE_OTHER_PARENT:
+                if status == "n" and merge_state == MERGE_STATE_OTHER_PARENT:
                     return
 
         # TODO: Just invoke self.normal() here for now.
