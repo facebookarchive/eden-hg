@@ -92,11 +92,12 @@ class EdenThriftClient(object):
         with self._get_client() as client:
             return client.getManifestEntry(self._eden_root, relativePath)
 
-    def setHgParents(self, p1, p2):
+    def setHgParents(self, p1, p2, need_flush=True):
         if p2 == node.nullid:
             p2 = None
 
-        self._flushPendingTransactions()
+        if need_flush:
+            self._flushPendingTransactions()
 
         parents = eden_ttypes.WorkingDirectoryParents(parent1=p1, parent2=p2)
         with self._get_client() as client:
@@ -104,11 +105,18 @@ class EdenThriftClient(object):
 
     def getStatus(self, parent, list_ignored):  # noqa: C901
         # type(str, bool) -> Dict[str, int]
+
+        # If we are in a pending transaction the parent commit we are querying against
+        # might not have been stored to disk yet.  Flush the pending transaction state
+        # before asking Eden about the status.
+        self._flushPendingTransactions()
+
         with self._get_client() as client:
             return client.getScmStatus(self._eden_root, list_ignored, parent)
 
-    def checkout(self, node, checkout_mode):
-        self._flushPendingTransactions()
+    def checkout(self, node, checkout_mode, need_flush=True):
+        if need_flush:
+            self._flushPendingTransactions()
         with self._get_client() as client:
             return client.checkOutRevision(self._eden_root, node, checkout_mode)
 

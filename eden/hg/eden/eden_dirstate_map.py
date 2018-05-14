@@ -33,12 +33,6 @@ class eden_dirstate_map(dirstate.dirstatemap):
         self._thrift_client = thrift_client
         self._repo = repo
 
-    def setparents(self, p1, p2):
-        super(eden_dirstate_map, self).setparents(p1, p2)
-        # TODO(mbolin): Do not make this Thrift call to Eden until the
-        # transaction is committed.
-        self._thrift_client.setHgParents(p1, p2)
-
     def write(self, file, now):  # override
         # type(eden_dirstate_map, IO[str], float)
         parents = self.parents()
@@ -54,6 +48,12 @@ class eden_dirstate_map(dirstate.dirstatemap):
 
         eden.dirstate.write(file, parents, self._map, self.copymap)
         file.close()
+
+        # Inform the edenfs daemon about the parent change.
+        # We do not need to flush any pending transaction state here--manifest
+        # and changelog data for a transaction is always written to disk before the
+        # dirstate is updated.
+        self._thrift_client.setHgParents(parents[0], parents[1], need_flush=False)
         self._dirtyparents = False
         self.nonnormalset, self.otherparentset = self.nonnormalentries()
 
