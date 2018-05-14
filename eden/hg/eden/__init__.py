@@ -15,6 +15,13 @@ from __future__ import absolute_import, division, print_function
 import os
 import sys
 
+# Update sys.path so that we can find modules that we need.
+#
+# Our file should be "hgext3rd/eden/__init__.py", inside a directory
+# that also contains the other eden library modules.
+archive_root = os.path.normpath(os.path.join(__file__, "../../.."))
+sys.path.insert(0, archive_root)
+
 from mercurial import (
     cmdutil,
     error,
@@ -35,14 +42,6 @@ from . import EdenThriftClient as thrift, constants
 # the mercurial extension framework automatically looks for this variable
 # and will register all commands it contains.
 from .commands import cmdtable  # noqa: F401
-
-
-# Update sys.path so that we can find modules that we need.
-#
-# Our file should be "hgext3rd/eden/__init__.py", inside a directory
-# that also contains the other eden library modules.
-archive_root = os.path.normpath(os.path.join(__file__, "../../.."))
-sys.path.insert(0, archive_root)
 
 
 CheckoutMode = thrift.CheckoutMode
