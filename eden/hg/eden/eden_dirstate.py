@@ -214,11 +214,11 @@ class eden_dirstate(dirstate.dirstate):
                 if path in edenstatus or path in nonnormal:
                     continue
                 if flags == "l":
-                    mode = (stat.S_IFLNK | 0o777)
+                    mode = stat.S_IFLNK | 0o777
                 elif flags == "x":
-                    mode = (stat.S_IFREG | 0o755)
+                    mode = stat.S_IFREG | 0o755
                 else:
-                    mode = (stat.S_IFREG | 0o644)
+                    mode = stat.S_IFREG | 0o644
                 # Pretty much all of the callers of walk() only care about
                 # the st_mode field.
                 results[path] = statobject(mode=mode, size=0, mtime=0)
@@ -350,9 +350,8 @@ class eden_dirstate(dirstate.dirstate):
                 dirstate = nonnormal_copy.pop(path, None)
                 if dirstate:
                     state = dirstate[0]
-                    if (
-                        state == "a"
-                        or (state == "n" and dirstate[2] == MERGE_STATE_OTHER_PARENT)
+                    if state == "a" or (
+                        state == "n" and dirstate[2] == MERGE_STATE_OTHER_PARENT
                     ):
                         added_files.append(path)
                     else:
@@ -493,11 +492,9 @@ class eden_dirstate(dirstate.dirstate):
             entry = self._map._map.get(f)
             if entry is not None:
                 status, mode, merge_state = entry
-                if (
-                    status == "r"
-                    and merge_state in (
-                        MERGE_STATE_BOTH_PARENTS, MERGE_STATE_OTHER_PARENT
-                    )
+                if status == "r" and merge_state in (
+                    MERGE_STATE_BOTH_PARENTS,
+                    MERGE_STATE_OTHER_PARENT,
                 ):
                     source = self._map.copymap.get(f)
                     if merge_state == MERGE_STATE_BOTH_PARENTS:

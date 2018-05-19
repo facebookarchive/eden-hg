@@ -102,7 +102,7 @@ def merge_update(
     if not util.safehasattr(repo.dirstate, "eden_client"):
         why_not_eden = "This is not an eden repository."
     elif matcher is not None and not matcher.always():
-        why_not_eden = ("We don't support doing a partial update through " "eden yet.")
+        why_not_eden = "We don't support doing a partial update through " "eden yet."
     elif branchmerge:
         # TODO: We potentially should support handling this scenario ourself in
         # the future.  For now we simply haven't investigated what the correct
@@ -370,7 +370,7 @@ def _check_actions_and_raise_if_there_are_conflicts(actions):
             conflict_paths = conflict_paths[: max_to_show - 1]
             num_remaining = total_conflicts - len(conflict_paths)
             conflict_paths.append("... (%d more conflicts)" % num_remaining)
-        msg = (_("conflicting changes:\n  ") + "\n  ".join(conflict_paths))
+        msg = _("conflicting changes:\n  ") + "\n  ".join(conflict_paths)
         hint = _("commit or update --clean to discard changes")
         raise error.Abort(msg, hint=hint)
 
