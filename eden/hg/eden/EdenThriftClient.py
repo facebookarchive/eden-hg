@@ -64,7 +64,6 @@ NoValueForKeyError = eden_ttypes.NoValueForKeyError
 
 
 class EdenThriftClient(object):
-
     def __init__(self, repo):
         self._repo = repo
         self._root = repo.root

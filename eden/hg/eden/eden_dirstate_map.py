@@ -24,7 +24,6 @@ DUMMY_MTIME = 0
 
 
 class eden_dirstate_map(dirstate.dirstatemap):
-
     def __init__(self, ui, opener, root, thrift_client, repo):
         # type(eden_dirstate_map, ui, opener, str, EdenThriftClient) -> None
         super(eden_dirstate_map, self).__init__(ui, opener, root)
