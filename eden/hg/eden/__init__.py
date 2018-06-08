@@ -15,6 +15,11 @@ from __future__ import absolute_import, division, print_function
 import os
 import sys
 
+# Prevent isort from modifying this file.  Otherwise it incorrectly wants to move the
+# code that modifies sys.path below the imports.
+#
+# isort:skip_file
+
 # Update sys.path so that we can find modules that we need.
 #
 # Our file should be "hgext3rd/eden/__init__.py", inside a directory
