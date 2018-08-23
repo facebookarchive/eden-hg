@@ -256,7 +256,7 @@ class eden_dirstate(dirstate.dirstate):
                 if stat.S_ISDIR(mode):
                     if match.explicitdir:
                         match.explicitdir(path)
-                elif stat.S_ISREG(mode) or stat.S_ISREG(mode):
+                elif stat.S_ISREG(mode) or stat.S_ISLNK(mode):
                     explicit_matches[path] = mode
             except OSError as ex:
                 # Check to see if this refers to a removed file or directory.
