@@ -49,7 +49,10 @@ class eden_dirstate(dirstate.dirstate):
         # We should override any logic in dirstate that uses self._validate.
         validate = repo._dirstatevalidate
 
-        opener = repo.vfs
+        try:
+            opener = repo.localvfs
+        except AttributeError:
+            opener = repo.vfs
 
         # Newer versions of mercurial require a sparsematchfn argument to the
         # dirstate.

@@ -190,7 +190,11 @@ def merge_update(
         # Invoke the preupdate hook
         repo.hook("preupdate", throw=True, parent1=deststr, parent2="")
         # Record that we're in the middle of an update
-        repo.vfs.write("updatestate", destctx.hex())
+        try:
+            vfs = repo.localvfs
+        except AttributeError:
+            vfs = repo.vfs
+        vfs.write("updatestate", destctx.hex())
 
         # Ask eden to perform the checkout
         if force:
