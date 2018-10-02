@@ -239,7 +239,7 @@ def merge_update(
             mergemod.recordupdates(repo, actions, branchmerge)
 
             # Clear the update state
-            util.unlink(repo.vfs.join("updatestate"))
+            util.unlink(vfs.join("updatestate"))
 
     # Invoke the update hook
     repo.hook("update", parent1=deststr, parent2="", error=stats[3])
