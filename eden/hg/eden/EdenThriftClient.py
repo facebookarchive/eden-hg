@@ -14,8 +14,11 @@ instead of doing a normal scan of the filesystem.
 
 from __future__ import absolute_import, division, print_function
 
+import errno
 import os
+import random
 import sys
+import time
 
 import eden.dirstate
 from mercurial import demandimport, node
@@ -63,18 +66,35 @@ ManifestEntry = eden_ttypes.ManifestEntry
 NoValueForKeyError = eden_ttypes.NoValueForKeyError
 
 
+def readlink_retry_estale(path):
+    attempts = 10
+    while True:
+        try:
+            return os.readlink(path)
+        except OSError as ex:
+            if attempts == 0 or ex.errno != errno.ESTALE:
+                raise
+            pass
+        attempts -= 1
+        time.sleep(random.uniform(0.001, 0.01))
+
+
 class EdenThriftClient(object):
     def __init__(self, repo):
         self._repo = repo
         self._root = repo.root
 
-        self._socket_path = os.readlink(os.path.join(self._root, ".eden", "socket"))
+        self._socket_path = readlink_retry_estale(
+            os.path.join(self._root, ".eden", "socket")
+        )
         # Read the .eden/root symlink to see what eden thinks the name of this
         # mount point is.  This might not match self._root in some cases.  In
         # particular, a parent directory of the eden mount might be bind
         # mounted somewhere else, resulting in it appearing at multiple
         # separate locations.
-        self._eden_root = os.readlink(os.path.join(self._root, ".eden", "root"))
+        self._eden_root = readlink_retry_estale(
+            os.path.join(self._root, ".eden", "root")
+        )
 
     def _get_client(self):
         """
