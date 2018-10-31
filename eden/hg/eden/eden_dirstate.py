@@ -46,7 +46,13 @@ class eden_dirstate(dirstate.dirstate):
         except AttributeError:
             opener = repo.vfs
 
-        super(eden_dirstate, self).__init__(opener, ui, root, validate)
+        try:
+            super(eden_dirstate, self).__init__(opener, ui, root, validate)
+        except TypeError:
+            sparsematchfn = None
+            super(eden_dirstate, self).__init__(
+                opener, ui, root, validate, sparsematchfn
+            )
 
         def create_eden_dirstate(ui, opener, root):
             return eden_dirstate_map.eden_dirstate_map(
