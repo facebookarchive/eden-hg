@@ -12,15 +12,7 @@ import os
 import stat
 
 from eden.dirstate import MERGE_STATE_BOTH_PARENTS, MERGE_STATE_OTHER_PARENT
-from mercurial import (
-    dirstate,
-    encoding,
-    match as matchmod,
-    policy,
-    scmutil,
-    sparse as sparsemod,
-    util,
-)
+from mercurial import dirstate, encoding, match as matchmod, policy, scmutil, util
 from mercurial.node import nullid
 
 from . import EdenThriftClient as thrift, eden_dirstate_map as eden_dirstate_map
@@ -54,12 +46,7 @@ class eden_dirstate(dirstate.dirstate):
         except AttributeError:
             opener = repo.vfs
 
-        # Newer versions of mercurial require a sparsematchfn argument to the
-        # dirstate.
-        def sparsematchfn():
-            return sparsemod.matcher(repo)
-
-        super(eden_dirstate, self).__init__(opener, ui, root, validate, sparsematchfn)
+        super(eden_dirstate, self).__init__(opener, ui, root, validate)
 
         def create_eden_dirstate(ui, opener, root):
             return eden_dirstate_map.eden_dirstate_map(
@@ -134,7 +121,7 @@ class eden_dirstate(dirstate.dirstate):
     # - mercurial/fileset.py (_buildsubset)
     # - hgext/catnotate.py
     # - hgext/fastannotate/commands.py
-    # - hgext/fbsparse.py
+    # - hgext/sparse.py
     # - hgext/remotefilelog/__init__.py
     #
     # Code paths that invoke scmutil._interestingfiles()
