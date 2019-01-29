@@ -11,7 +11,12 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import errno
 
 import eden.dirstate
-from mercurial import dirstate, util
+
+# The "mercurial" package was renamed to "edenscm.mercurial" in D13853115,
+# but the old name is still available for backwards compatibility.
+# We are intentionally still using the old name here for compatibility until the
+# mercurial changes have been fully deployed everywhere.
+from mercurial import dirstate, util  # pyre-fixme
 from six import iteritems
 
 from . import EdenThriftClient as thrift
